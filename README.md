@@ -80,3 +80,22 @@ Import supports both:
 
 The prototype now includes a local proxy server in [server.js](C:/Users/eteho/Downloads/ShotBoard/server.js).
 For public deployment, keep the Gemini key only in server-side environment variables and do not place it back into client files.
+
+## Deployment Workflow
+
+Shonode is now connected to both GitHub and Vercel.
+
+- `main`: production branch
+- `preview`: staging / preview branch for Vercel preview deployments
+
+Recommended flow:
+
+1. work locally
+2. push to `preview` to check the hosted preview build
+3. merge or push to `main` when ready for production
+
+Current setup notes:
+
+- Production environment variables are configured in Vercel
+- Preview environment variables are configured for the `preview` branch
+- Repository: `https://github.com/etehofk1-ops/shonode`
