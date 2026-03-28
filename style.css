@@ -3340,6 +3340,122 @@ button:disabled {
   border-radius: 2px 2px 0 0;
 }
 
+/* ── View Toggle Button ───────────────────────────────────────────────────── */
+
+.canvas-tool-group--view-toggle {
+  display: none; /* hidden on desktop */
+}
+
+.view-toggle-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 12px;
+}
+
+.view-toggle-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.view-toggle-label {
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.view-toggle-button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: rgba(37, 99, 235, 0.22);
+  color: var(--accent-strong);
+}
+
+@media (max-width: 760px) {
+  .canvas-tool-group--view-toggle {
+    display: flex;
+  }
+}
+
+/* ── is-list-mode ─────────────────────────────────────────────────────────── */
+/* Activated on mobile only; desktop unchanged */
+
+body.is-list-mode .canvas-viewport {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 12px 160px;
+}
+
+body.is-list-mode .board-sizer {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+body.is-list-mode .board {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  transform: none !important;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: none;
+}
+
+body.is-list-mode .story-card {
+  position: static !important;
+  width: 100% !important;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.07);
+  touch-action: auto;
+}
+
+/* In list mode: hide drag handle dots, node ports, flow row */
+body.is-list-mode .drag-handle-icon {
+  display: none;
+}
+
+body.is-list-mode .panel-handle {
+  cursor: default;
+  touch-action: auto;
+}
+
+body.is-list-mode .node-port {
+  display: none;
+}
+
+body.is-list-mode .connection-layer {
+  display: none;
+}
+
+/* Collapse prompt panels by default in list mode */
+body.is-list-mode .prompt-panel:not(.is-open-in-list) {
+  min-height: 0;
+}
+
+body.is-list-mode .prompt-panel:not(.is-open-in-list) .prompt-panel-body {
+  display: none;
+}
+
+body.is-list-mode .prompt-panel:not(.is-open-in-list) .prompt-collapsed-preview {
+  display: block;
+}
+
+/* Collapse vid upload area if no video */
+body.is-list-mode .vid-upload-area {
+  min-height: 80px;
+}
+
+/* Hide zoom controls (not relevant in list mode) */
+body.is-list-mode .canvas-tool-group:has(#zoomInButton) {
+  display: none;
+}
+
 /* Mobile floating action buttons */
 .mobile-fab-row {
   display: none;

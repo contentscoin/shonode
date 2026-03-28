@@ -83,6 +83,7 @@ const timelineTimecodeEl = document.getElementById("timelineTimecode");
 const timelineZoomInBtn = document.getElementById("timelineZoomIn");
 const timelineZoomOutBtn = document.getElementById("timelineZoomOut");
 const timelinePlayButton = document.getElementById("timelinePlayButton");
+const listViewButton = document.getElementById("listViewButton");
 const confirmDialog = document.getElementById("confirmDialog");
 const confirmDialogBackdrop = document.getElementById("confirmDialogBackdrop");
 const confirmDialogEyebrow = document.getElementById("confirmDialogEyebrow");
@@ -130,6 +131,7 @@ let panelVideoStoragePromise = null;
 let isPlaying = false;
 let playheadRafId = null;
 let lastPlayTimestamp = null;
+let isListMode = false;
 
 const savedView = loadViewState();
 let zoom = clamp(savedView.zoom ?? 1, MIN_ZOOM, MAX_ZOOM);
@@ -153,6 +155,28 @@ window.ShonodePanelImageStorage = {
 };
 
 initializePanelVideoStorage();
+
+// Auto-enable list mode on mobile
+if (MOBILE_HOME_MEDIA_QUERY.matches) {
+  enableListMode(false);
+}
+
+listViewButton?.addEventListener("click", () => {
+  if (isListMode) {
+    disableListMode();
+  } else {
+    enableListMode();
+  }
+});
+
+MOBILE_HOME_MEDIA_QUERY.addEventListener("change", (e) => {
+  if (!e.matches && isListMode) {
+    disableListMode();
+  }
+  if (e.matches && !isListMode) {
+    enableListMode(false);
+  }
+});
 
 syncSaveButtonIdleLabel();
 
@@ -1082,7 +1106,11 @@ function renderPanels(options = {}) {
     panelCount.textContent = String(panels.length);
   }
 
-  panels.forEach((panel, index) => {
+  const orderedPanels = isListMode
+    ? [...panels].sort((a, b) => a.y - b.y || a.x - b.x)
+    : panels;
+
+  orderedPanels.forEach((panel, index) => {
     board.appendChild(createPanelElement(panel, index));
   });
 
@@ -1456,6 +1484,7 @@ function createPanelElement(panel, index) {
 }
 
 function startCardDrag(event, panelId) {
+  if (isListMode) return;
   const dragIds =
     selectedPanelIds.size > 1 && selectedPanelIds.has(panelId)
       ? Array.from(selectedPanelIds)
@@ -1599,6 +1628,7 @@ function handleBoardPointerDown(event) {
 }
 
 function shouldStartPan(event) {
+  if (isListMode) return false;
   if (panState || dragState || pinchState) {
     return false;
   }
@@ -2332,6 +2362,33 @@ function shouldIgnoreCardSelection(target) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+// ── List Mode ────────────────────────────────────────────────────────────────
+
+function enableListMode(animate = true) {
+  isListMode = true;
+  document.body.classList.add("is-list-mode");
+  if (listViewButton) {
+    listViewButton.setAttribute("aria-pressed", "true");
+    listViewButton.querySelector(".view-toggle-label").textContent = "캔버스";
+  }
+  // Re-render in sorted order without zoom transform
+  renderPanels();
+  if (animate) {
+    setStatus("리스트 뷰로 전환했습니다.");
+  }
+}
+
+function disableListMode() {
+  isListMode = false;
+  document.body.classList.remove("is-list-mode");
+  if (listViewButton) {
+    listViewButton.setAttribute("aria-pressed", "false");
+    listViewButton.querySelector(".view-toggle-label").textContent = "리스트";
+  }
+  renderPanels();
+  setStatus("캔버스 뷰로 전환했습니다.");
 }
 
 // ── Edit Bar ────────────────────────────────────────────────────────────────
