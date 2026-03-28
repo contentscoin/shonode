@@ -71,8 +71,15 @@ const mobileRedoFab = document.getElementById("mobileRedoFab");
 const editBar = document.getElementById("editBar");
 const editBarToggle = document.getElementById("editBarToggle");
 const editBarContent = document.getElementById("editBarContent");
-const editTimeline = document.getElementById("editTimeline");
 const editTotalDuration = document.getElementById("editTotalDuration");
+const timelineScrollArea = document.getElementById("timelineScrollArea");
+const timelineInnerEl = document.getElementById("timelineInner");
+const timelineRulerEl = document.getElementById("timelineRuler");
+const timelineTrackLane = document.getElementById("timelineTrackLane");
+const timelinePlayheadEl = document.getElementById("timelinePlayhead");
+const timelineTimecodeEl = document.getElementById("timelineTimecode");
+const timelineZoomInBtn = document.getElementById("timelineZoomIn");
+const timelineZoomOutBtn = document.getElementById("timelineZoomOut");
 const confirmDialog = document.getElementById("confirmDialog");
 const confirmDialogBackdrop = document.getElementById("confirmDialogBackdrop");
 const confirmDialogEyebrow = document.getElementById("confirmDialogEyebrow");
@@ -111,7 +118,10 @@ let panelImagePersistFingerprint = "";
 let canvasPointers = new Map(); // touch pointers tracked on canvas
 let pinchState = null;
 let editBarOpen = false;
-let timelineDragSourceId = null;
+let timelineScale = 80; // px per second
+let playheadTimeSec = 0;
+let timelineClipDragState = null;
+let timelineResizeDragState = null;
 
 const savedView = loadViewState();
 let zoom = clamp(savedView.zoom ?? 1, MIN_ZOOM, MAX_ZOOM);
@@ -182,6 +192,33 @@ editBar.querySelectorAll(".edit-bar-tab").forEach((tab) => {
       openEditBar();
     }
   });
+});
+
+timelineZoomInBtn?.addEventListener("click", () => {
+  timelineScale = Math.min(400, Math.round(timelineScale * 1.5));
+  renderTimeline();
+});
+
+timelineZoomOutBtn?.addEventListener("click", () => {
+  timelineScale = Math.max(20, Math.round(timelineScale / 1.5));
+  renderTimeline();
+});
+
+timelineRulerEl?.addEventListener("mousedown", (e) => {
+  const rect = timelineRulerEl.getBoundingClientRect();
+  const setTime = (clientX) => {
+    const x = clientX - rect.left + (timelineScrollArea?.scrollLeft ?? 0);
+    playheadTimeSec = Math.max(0, x / timelineScale);
+    updatePlayheadPosition();
+  };
+  setTime(e.clientX);
+  const onMove = (mv) => setTime(mv.clientX);
+  const onUp = () => {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+  };
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
 });
 
 deleteSelectionButton.addEventListener("click", async () => {
@@ -939,6 +976,7 @@ function updateHistoryUI() {
   redoButton.disabled = !canRedo;
   if (mobileUndoFab) mobileUndoFab.disabled = !canUndo;
   if (mobileRedoFab) mobileRedoFab.disabled = !canRedo;
+  updateTimelineDurationLabel();
   maybeRefreshEditTimeline();
 }
 
@@ -2278,7 +2316,7 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-// ── Edit Bar (Bottom Timeline Panel) ────────────────────────────────────────
+// ── Edit Bar ────────────────────────────────────────────────────────────────
 
 function openEditBar() {
   editBarOpen = true;
@@ -2286,7 +2324,7 @@ function openEditBar() {
   editBarContent.hidden = false;
   editBarToggle.setAttribute("aria-expanded", "true");
   editBarToggle.setAttribute("aria-label", "편집 패널 닫기");
-  renderEditTimeline();
+  renderTimeline();
 }
 
 function closeEditBar() {
@@ -2337,109 +2375,254 @@ function formatTotalDuration(totalSec) {
   return s > 0 ? `총 ${m}분 ${s}초` : `총 ${m}분`;
 }
 
-function renderEditTimeline() {
-  const ordered = getTimelineOrder();
-  const totalSec = ordered.reduce((sum, p) => sum + parseDurationSeconds(p.durationLabel), 0);
-  editTotalDuration.textContent = formatTotalDuration(totalSec);
+function formatTimecode(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  const fr = Math.floor((sec % 1) * 24);
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}:${String(fr).padStart(2, "0")}`;
+}
 
-  if (ordered.length === 0) {
-    editTimeline.innerHTML = '<div class="edit-timeline-empty">컷을 추가하면 타임라인이 표시됩니다.</div>';
+function getClipDurationSec(panel) {
+  const parsed = parseDurationSeconds(panel.durationLabel);
+  return parsed > 0 ? parsed : 3;
+}
+
+function getOrderedPanelsWithTimes() {
+  const ordered = getTimelineOrder();
+  let t = 0;
+  return ordered.map((panel) => {
+    const dur = getClipDurationSec(panel);
+    const startTime = t;
+    t += dur;
+    return { panel, startTime, duration: dur };
+  });
+}
+
+function updateTimelineDurationLabel() {
+  const clips = getOrderedPanelsWithTimes();
+  const totalSec = clips.reduce((sum, c) => sum + c.duration, 0);
+  editTotalDuration.textContent = formatTotalDuration(totalSec);
+}
+
+function renderTimeline() {
+  if (!editBarOpen) {
     return;
   }
 
-  editTimeline.innerHTML = "";
+  const clips = getOrderedPanelsWithTimes();
+  const totalSec = clips.reduce((sum, c) => sum + c.duration, 0);
+  editTotalDuration.textContent = formatTotalDuration(totalSec);
 
-  ordered.forEach((panel, index) => {
+  const END_PAD = 80;
+  const areaWidth = timelineScrollArea ? timelineScrollArea.clientWidth : 600;
+  const totalWidth = Math.max(totalSec * timelineScale + END_PAD, areaWidth);
+
+  if (timelineInnerEl) {
+    timelineInnerEl.style.width = `${totalWidth}px`;
+  }
+
+  renderTimelineRuler(totalSec, totalWidth);
+  renderTimelineClips(clips);
+  updatePlayheadPosition();
+}
+
+function renderTimelineRuler(totalSec, totalWidth) {
+  if (!timelineRulerEl) {
+    return;
+  }
+  timelineRulerEl.innerHTML = "";
+
+  let majorInterval = 1;
+  if (timelineScale < 25) {
+    majorInterval = 10;
+  } else if (timelineScale < 50) {
+    majorInterval = 5;
+  } else if (timelineScale < 100) {
+    majorInterval = 2;
+  }
+  const minorInterval = majorInterval / 4;
+
+  let t = 0;
+  while (t <= totalSec + majorInterval) {
+    const x = t * timelineScale;
+    if (x > totalWidth + 10) {
+      break;
+    }
+    const stepIndex = Math.round(t / minorInterval);
+    const isMajor = stepIndex % 4 === 0;
+
+    const tick = document.createElement("div");
+    tick.className = "timeline-ruler-tick";
+    tick.style.left = `${x}px`;
+
+    const line = document.createElement("div");
+    line.className = "timeline-ruler-tick-line" + (isMajor ? " timeline-ruler-tick-line--major" : "");
+    tick.appendChild(line);
+
+    if (isMajor) {
+      const label = document.createElement("div");
+      label.className = "timeline-ruler-tick-label";
+      label.textContent = formatTimecode(t);
+      tick.appendChild(label);
+    }
+
+    timelineRulerEl.appendChild(tick);
+    t = Math.round((t + minorInterval) * 10000) / 10000;
+  }
+}
+
+function renderTimelineClips(clips) {
+  if (!timelineTrackLane) {
+    return;
+  }
+  timelineTrackLane.innerHTML = "";
+
+  if (clips.length === 0) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-subtle);font-size:0.84rem;";
+    empty.textContent = "컷을 추가하면 타임라인이 표시됩니다.";
+    timelineTrackLane.appendChild(empty);
+    return;
+  }
+
+  clips.forEach(({ panel, startTime, duration }, index) => {
+    const x = startTime * timelineScale;
+    const w = Math.max(duration * timelineScale, 20);
+
     const clip = document.createElement("div");
-    clip.className = "edit-clip";
+    clip.className = "timeline-clip";
+    clip.style.left = `${x}px`;
+    clip.style.width = `${w}px`;
     clip.dataset.panelId = panel.id;
-    clip.draggable = true;
-    clip.setAttribute("role", "listitem");
-    clip.setAttribute("aria-label", `${panel.sceneTitle || `컷 ${index + 1}`}${panel.durationLabel ? `, ${panel.durationLabel}` : ""}`);
 
     if (selectedPanelIds.has(panel.id)) {
       clip.classList.add("is-selected");
     }
 
-    // Thumbnail
-    const thumb = document.createElement("div");
-    thumb.className = "edit-clip-thumb";
-
     if (panel.image) {
       const img = document.createElement("img");
+      img.className = "timeline-clip-thumb";
       img.src = panel.image;
       img.alt = "";
-      thumb.appendChild(img);
-    } else {
-      const idx = document.createElement("span");
-      idx.className = "edit-clip-index";
-      idx.textContent = `${index + 1}`;
-      thumb.appendChild(idx);
+      clip.appendChild(img);
     }
 
-    // Meta
-    const meta = document.createElement("div");
-    meta.className = "edit-clip-meta";
+    const content = document.createElement("div");
+    content.className = "timeline-clip-content";
+    const titleEl = document.createElement("span");
+    titleEl.className = "timeline-clip-title";
+    titleEl.textContent = panel.sceneTitle || `컷 ${index + 1}`;
+    content.appendChild(titleEl);
+    clip.appendChild(content);
 
-    const title = document.createElement("span");
-    title.className = "edit-clip-title";
-    title.textContent = panel.sceneTitle || `컷 ${index + 1}`;
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "timeline-clip-resize-handle";
+    clip.appendChild(resizeHandle);
 
-    const dur = document.createElement("span");
-    dur.className = "edit-clip-duration";
-    dur.textContent = panel.durationLabel || "—";
-
-    meta.appendChild(title);
-    meta.appendChild(dur);
-    clip.appendChild(thumb);
-    clip.appendChild(meta);
-
-    // Click: navigate to panel on canvas
+    // Click: navigate
     clip.addEventListener("click", () => {
+      if (timelineClipDragState || timelineResizeDragState) {
+        return;
+      }
       setSelection([panel.id]);
       zoomToPanel(panel.id, Math.max(zoom, NARROW_HOME_ZOOM));
-      renderEditTimeline();
+      renderTimeline();
     });
 
-    // Drag to reorder
-    clip.addEventListener("dragstart", (e) => {
-      timelineDragSourceId = panel.id;
+    // Drag body: reorder
+    clip.addEventListener("mousedown", (e) => {
+      if (e.target === resizeHandle || e.button !== 0) {
+        return;
+      }
+      e.preventDefault();
+
+      const startClientX = e.clientX;
+      const startLeft = x;
+      let moved = false;
+
+      timelineClipDragState = { panelId: panel.id };
       clip.classList.add("is-dragging");
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", panel.id);
+
+      const onMove = (mv) => {
+        if (Math.abs(mv.clientX - startClientX) > 4) {
+          moved = true;
+        }
+        clip.style.left = `${Math.max(0, startLeft + (mv.clientX - startClientX))}px`;
+      };
+
+      const onUp = (up) => {
+        clip.classList.remove("is-dragging");
+        timelineClipDragState = null;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+
+        if (moved) {
+          const dropLeft = Math.max(0, startLeft + (up.clientX - startClientX));
+          const dropTime = dropLeft / timelineScale;
+          const target = clips.find((c) =>
+            c.panel.id !== panel.id &&
+            dropTime >= c.startTime &&
+            dropTime < c.startTime + c.duration
+          );
+          if (target) {
+            swapTimelineClips(panel.id, target.panel.id);
+          } else {
+            renderTimeline();
+          }
+        }
+      };
+
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
     });
 
-    clip.addEventListener("dragend", () => {
-      clip.classList.remove("is-dragging");
-      timelineDragSourceId = null;
-      editTimeline.querySelectorAll(".is-drag-over").forEach((el) => el.classList.remove("is-drag-over"));
-    });
-
-    clip.addEventListener("dragover", (e) => {
-      if (!timelineDragSourceId || timelineDragSourceId === panel.id) {
-        return;
-      }
+    // Drag resize handle: change duration
+    resizeHandle.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      editTimeline.querySelectorAll(".is-drag-over").forEach((el) => el.classList.remove("is-drag-over"));
-      clip.classList.add("is-drag-over");
+      e.stopPropagation();
+
+      const startClientX = e.clientX;
+      const startW = w;
+
+      timelineResizeDragState = { panelId: panel.id };
+
+      const onMove = (mv) => {
+        const newW = Math.max(20, startW + (mv.clientX - startClientX));
+        clip.style.width = `${newW}px`;
+      };
+
+      const onUp = (up) => {
+        const newW = Math.max(20, startW + (up.clientX - startClientX));
+        const newDurSec = Math.round((newW / timelineScale) * 10) / 10;
+        const newLabel = `${newDurSec}s`;
+
+        pushHistoryState();
+        setPanelFields(panel.id, { durationLabel: newLabel });
+        persistPanels();
+        updateHistoryUI();
+        setStatus(`${panel.sceneTitle || `컷 ${index + 1}`} 길이를 ${newLabel}로 변경했습니다.`);
+
+        timelineResizeDragState = null;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
     });
 
-    clip.addEventListener("dragleave", () => {
-      clip.classList.remove("is-drag-over");
-    });
-
-    clip.addEventListener("drop", (e) => {
-      e.preventDefault();
-      clip.classList.remove("is-drag-over");
-      if (!timelineDragSourceId || timelineDragSourceId === panel.id) {
-        return;
-      }
-      swapTimelineClips(timelineDragSourceId, panel.id);
-    });
-
-    editTimeline.appendChild(clip);
+    timelineTrackLane.appendChild(clip);
   });
+}
+
+function updatePlayheadPosition() {
+  if (!timelinePlayheadEl) {
+    return;
+  }
+  timelinePlayheadEl.style.left = `${playheadTimeSec * timelineScale}px`;
+  if (timelineTimecodeEl) {
+    timelineTimecodeEl.textContent = formatTimecode(playheadTimeSec);
+  }
 }
 
 function swapTimelineClips(sourceId, targetId) {
@@ -2459,15 +2642,15 @@ function swapTimelineClips(sourceId, targetId) {
   persistPanels();
   updateHistoryUI();
   renderPanels();
-  renderEditTimeline();
   setStatus("타임라인 순서를 변경했습니다.");
 }
 
 function maybeRefreshEditTimeline() {
   if (editBarOpen) {
-    renderEditTimeline();
+    renderTimeline();
   }
 }
+
 
 function setStatus(message, tone = "neutral") {
   statusMessage.textContent = message;

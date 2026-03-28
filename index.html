@@ -376,6 +376,10 @@
             <div class="edit-bar-sep" aria-hidden="true"></div>
             <span id="editTotalDuration" class="edit-duration-label">총 0초</span>
             <div class="edit-bar-spacer" aria-hidden="true"></div>
+            <div class="edit-bar-zoom">
+              <button id="timelineZoomOut" class="edit-bar-zoom-btn" type="button" aria-label="타임라인 축소">−</button>
+              <button id="timelineZoomIn" class="edit-bar-zoom-btn" type="button" aria-label="타임라인 확대">+</button>
+            </div>
             <button id="editBarToggle" class="edit-bar-toggle" type="button" aria-expanded="false" aria-label="편집 패널 열기">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 15L12 9L18 15"></path>
@@ -383,8 +387,22 @@
             </button>
           </div>
           <div id="editBarContent" class="edit-bar-content" hidden>
-            <div id="editTimeline" class="edit-timeline" role="list" aria-label="타임라인 컷 목록">
-              <div class="edit-timeline-empty">컷을 추가하면 타임라인이 표시됩니다.</div>
+            <div class="timeline-workspace">
+              <div class="timeline-sidebar">
+                <div class="timeline-sidebar-ruler">
+                  <span id="timelineTimecode" class="timeline-timecode">00:00:00</span>
+                </div>
+                <div class="timeline-sidebar-track">
+                  <span class="timeline-track-label">V1</span>
+                </div>
+              </div>
+              <div id="timelineScrollArea" class="timeline-scroll-area">
+                <div id="timelineInner" class="timeline-inner">
+                  <div id="timelineRuler" class="timeline-ruler"></div>
+                  <div id="timelineTrackLane" class="timeline-track-lane"></div>
+                  <div id="timelinePlayhead" class="timeline-playhead"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
