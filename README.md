@@ -122,6 +122,10 @@ For Vercel:
 3. Set `SHONODE_ALLOWED_ORIGINS` to your production origin if needed.
 4. Do not expose real keys in client-side files.
 
+## Roadmap and plans
+
+Product and architecture planning documents live in `docs/plan/`. The current SaaS evolution plan is [`docs/plan/ad-video-storyboard-saas-기획서.md`](docs/plan/ad-video-storyboard-saas-%EA%B8%B0%ED%9A%8D%EC%84%9C.md) (Korean, with an English abstract).
+
 ## Contributing
 
 Pull requests, issues, experiments, and small collaboration ideas are welcome. See `CONTRIBUTING.md`.
