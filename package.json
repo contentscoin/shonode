@@ -21,7 +21,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check storyboard-proxy.js && node --check api/storyboard.js && node --check script.js && node --check shotboard-ai.js && node --check ai-client.js"
+    "check": "node --check server.js && node --check storyboard-proxy.js && node --check config-endpoint.js && node --check api/storyboard.js && node --check api/config.js && node --check script.js && node --check shotboard-ai.js && node --check ai-client.js && node --check auth-client.js && node --check cloud-sync.js"
   },
   "engines": {
     "node": ">=20"

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { handleStoryboardProxy, sendJson } = require("./storyboard-proxy");
+const { handleConfigRequest } = require("./config-endpoint");
 
 const ROOT_DIR = __dirname;
 
@@ -37,6 +38,11 @@ const requestHandler = async (request, response) => {
       await handleStoryboardProxy(request, response, {
         apiKeyHint: "Set GEMINI_API_KEY in .env or the environment."
       });
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/config") {
+      handleConfigRequest(request, response);
       return;
     }
 

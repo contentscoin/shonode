@@ -113,6 +113,21 @@ Older snapshots are migrated on import: missing v2 fields fall back to safe defa
 - `api/storyboard.js` — Vercel serverless entry point
 - `brand/` — Shonode logo and mark assets
 
+## Cloud mode (optional, Supabase)
+
+Shonode runs fully local by default. Setting two environment variables enables an optional cloud mode with account login and cloud project storage:
+
+```env
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your_supabase_anon_or_publishable_key
+```
+
+- The browser fetches these from `/api/config`; when unset, the cloud button never appears and no external requests are made.
+- Apply the schema in `supabase/migrations/0001_shonode_studio_init.sql` to your Supabase project (SQL Editor or `supabase db push`). It creates `profiles` and `projects` tables with owner-only row-level security.
+- Auth: email/password plus Google OAuth (enable the provider in your Supabase dashboard).
+- Cloud projects store the whole `shonode-workspace-v2` snapshot; `.shonode` export/import keeps working regardless.
+- `vendor/supabase-js-2.110.0.js` is a vendored UMD build of `@supabase/supabase-js`, loaded only when cloud mode is configured.
+
 ## Deployment notes
 
 Shonode can be deployed as a static frontend with a server-side `/api/storyboard` route.
@@ -122,7 +137,8 @@ For Vercel:
 1. Configure `GEMINI_API_KEY` in Vercel environment variables.
 2. Configure `GEMINI_MODEL` if you want a model other than the default.
 3. Set `SHONODE_ALLOWED_ORIGINS` to your production origin if needed.
-4. Do not expose real keys in client-side files.
+4. Optionally set `SUPABASE_URL` and `SUPABASE_ANON_KEY` to enable cloud mode.
+5. Do not expose real secret keys in client-side files (the Supabase anon key is public by design; the Gemini key and Supabase service-role key are not).
 
 ## Roadmap and plans
 
