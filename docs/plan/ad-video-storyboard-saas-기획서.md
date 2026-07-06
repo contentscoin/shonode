@@ -2,10 +2,10 @@
 
 > **English abstract.** This document is the product plan for evolving Shonode — an open-source, vanilla-JS storyboard node canvas for AI-assisted commercial video planning — into a SaaS ("Shonode Studio", working title) that plans and generates ad-video storyboards. The AI pipeline design is grounded in two proven OpenCrab workflow assets: the 5-node *Ad Storyboard Skill Workflow* (QC gate → pattern selection → six-beat storyboard → prompt & risk → output contract) and a 14-step full production workflow (brief-to-delivery). The stack decision is incremental layering of Supabase (auth/Postgres/storage) onto the existing static-frontend + Vercel serverless architecture — a strangler-fig migration, not a rewrite. This is a planning document; implementation follows in phases described in §8.
 
-- 문서 상태: 초안 v0.1 (2026-07-06)
+- 문서 상태: 초안 v0.2 (2026-07-06) — `contentscoin/video-production` 대조 완료분 반영
 - 대상 브랜치: `claude/ad-video-storyboard-saas-tot1xg`
 - 산출물 성격: 제품/아키텍처 기획 문서 (구현 없음)
-- 미확정 항목: §9 Open Questions — `contentscoin/video-production` 비공개 리포 대조 후 확정 (**미확인** 상태, 세션 접근 승인 불가로 보류)
+- 미확정 항목: §9 Open Questions — video-production 대조로 7건 중 5건 해소, 잔여 2건(§9.2)
 
 ---
 
@@ -110,10 +110,16 @@ Shonode는 현재 "브리프 한 문단 → Gemini 단발 호출 → 컷 카드 
 
 ### Step 5 — 잡스펙 & 핸드오프 (Pro/v2)
 
-- Runway/Seedance/Kling **잡스펙 생성**: 클립별 prompt, duration, aspect ratio, 참조 슬롯 바인딩(`@image1`=키프레임, `@video1`=카메라 레퍼런스, `@audio1`=BGM), 슬롯 한도 준수, 폴백 모델 지정.
-- 키프레임 이미지 **실제 생성**(크레딧 차감).
-- 후반 지시서 export: EDL, 자막(ASS/SRT), TTS/BGM 지시, 로드니스 타깃, AI 고지 프레임.
-- **regen_queue QA 보드**: 문제 컷에 플래그 → 해당 컷만 재생성 대기열로.
+- Runway/Seedance/Kling **잡스펙 생성**. 슬롯 바인딩 스키마는 video-production 리포에서 실증된 포맷을 채택한다 *(출처: `reference_binding.json`, `08d-master-binding-sheet.md`)*:
+  - 슬롯 태그: `@이미지1`–`@이미지9`, `@비디오1`–`3`, `@오디오1`–`3` (엔진 한도: 이미지 9 / 비디오 3 / 오디오 3 / **총 12파일**, 프롬프트 3,500자)
+  - 슬롯 항목: `{role, ref_tag, anchor_id, path, bindable, priority, required}` — role 예: `character_identity`, `environment_light`, `camera_motion_only`(비디오는 카메라 모션 참조 전용, 인물·배경 이식 금지 규칙 포함)
+  - 클립 간 연속성: `continuity_out` 필드(다음 클립으로의 핸드오프 상태 기술)
+  - 실전 슬롯 예산: 클립당 필수 이미지 2장(캐릭터+환경) + 옵션 0–2장 수준
+- **클립 내부 몽타주 패턴**: 6비트 계약(서사 레벨)과 별도로, 클립 1개 = 5비트 몽타주(비트당 ~2초 하드컷, 비트마다 샷사이즈 변경) 규칙을 잡스펙에 포함 *(출처: `09-keyframe-shot-strategy.md` — "5비트만으로 렌더 실패" 후 25샷 스토리보드 PNG 바인딩으로 진화한 renewal-v2 교훈 포함)*.
+- 키프레임 이미지 **실제 생성**(크레딧 차감). 프롬프트는 CRAFT 프레임워크(Context/Reference/Action/Framing/Tone) + 공통 `lock_suffix`(브랜드 팔레트 + 유니버설 네거티브) 배치 매니페스트 `{id, output, seed}` 포맷 *(출처: `08c-master-prompt-sheet.md`, `batch1-manifest.json`)*.
+- 후반 지시서 export: **오디오 레이어 분리 원칙** — 생성 엔진은 SFX만, BGM(Suno류)·VO(TTS)·자막/수퍼는 조립 단계에서 레이어링 *(출처: `renewal-v2/05-suno-bgm-brief.md`)*. EDL, 자막(ASS/SRT), 로드니스 타깃, AI 고지 프레임.
+- **regen_queue QA 보드**: 문제 컷에 플래그 → "증상 → 1줄 수정 → 재생성 1회" 테이블 방식 *(출처: `10-seedance-step-by-step-guide.md`의 per-clip fix 테이블)*.
+- **엔진 연동 현실**: Seedance는 현재 수동 UI(Dreamina/CapCut) 중심으로 공개 API가 검증되지 않았다 *(출처: `07-clip01-trial-run.md` §6 "실행 스크립트 없음, 수동 UI만 가능")*. 따라서 v2 커넥터는 ① **잡스펙 export(수동 UI용 복붙 킷)** 를 기본으로 하고 ② API 가용 엔진(Runway 등)만 직접 호출을 붙이는 2단 전략으로 한다.
 
 ### 최종 산출물 스키마 = final_output_contract
 
@@ -180,8 +186,9 @@ Shonode는 현재 "브리프 한 문단 → Gemini 단발 호출 → 컷 카드 
    - `POST /api/generate/image`, `POST /api/generate/video-spec` (v1/v2)
    - `GET /api/config` — 클라이언트에 SUPABASE_URL/ANON_KEY 주입(빌드 치환이 없으므로)
    - 프로젝트 CRUD 라우트는 **만들지 않는다** — Supabase 클라이언트 직결 + RLS. 서버리스는 LLM 호출·과금이 걸린 작업 전용.
-4. **오케스트레이션**: MVP는 클라이언트가 스텝별로 호출(진행 UI 표시). v1에서 `generation_jobs` 테이블 + Supabase Edge Function/큐 기반 서버 오케스트레이션 검토.
-5. **크레딧/미터링**: `credit_ledger` + 원자적 Postgres 함수. 호출 **전 사전 차감(escrow)**, 실패 시 환급. **BYO 키**: Supabase Vault에 암호화 저장 후 서버 측에서만 사용(키를 클라이언트에 두지 않는 현행 철학 유지). Free는 metered 전용. 셀프호스트 OSS 모드(.env GEMINI_API_KEY)는 계속 지원 = 오픈코어.
+4. **오케스트레이션**: MVP는 클라이언트가 스텝별로 호출(진행 UI 표시). v1에서 `generation_jobs` 테이블 + Supabase Edge Function/큐 기반 서버 오케스트레이션 검토. 프로젝트 상태는 video-production에서 실증된 **게이트 모델**을 차용 — G0 기획 LOCK → G1 키프레임 → G2 트라이얼 1클립+QA → G3 전체 생성 → G4 조립·납품 *(출처: `08-production-master-index.md` §2)*. 각 게이트에 pass 조건과 담당(휴먼 승인 여부)을 명시하고, QA FAIL 시에도 사용자 재량으로 다음 게이트 진행 가능(비차단 오버라이드, 로그 기록).
+5. **조립(어셈블리) 워커 — v2**: ffmpeg가 아니라 **Remotion**(React 기반 프로그래매틱 비디오)을 조립 엔진으로 채택한다 *(출처: video-production `remotion/` 스캐폴드 — 클립 임포트·자막·가격 카드·CTA 컴포지션 스펙이 이미 Remotion 기준으로 정의됨)*. 실행 위치는 Vercel 서버리스 불가 → **Remotion Lambda 또는 별도 렌더 워커**. 자막/수퍼는 ASS/SRT 파일이 아닌 Remotion 컴포지션 레이어로 우선 처리하고, 파일 export는 보조 산출물로 제공.
+6. **크레딧/미터링**: `credit_ledger` + 원자적 Postgres 함수. 호출 **전 사전 차감(escrow)**, 실패 시 환급. **BYO 키**: Supabase Vault에 암호화 저장 후 서버 측에서만 사용(키를 클라이언트에 두지 않는 현행 철학 유지). Free는 metered 전용. 셀프호스트 OSS 모드(.env GEMINI_API_KEY)는 계속 지원 = 오픈코어.
 
 ### 4.2 배포 토폴로지
 
@@ -232,10 +239,10 @@ erDiagram
 | `orgs` / `org_members` | name, owner_id, plan, seat_count / role(owner·admin·editor·reviewer·viewer) | Team 티어 |
 | `projects` | owner_id, org_id?, title, brand_name, source_url, **risk_class**(low·proof_required·high), status, **snapshot jsonb**(shonode-workspace-v2), snapshot_version, deleted_at | MVP는 snapshot 단일 소스 |
 | `storyboards` | project_id, variant(15s·30s·45s), pattern_id, **contract jsonb**(final_output_contract), status | 변형별 1행 |
-| `panels` | storyboard_id, **beat**(hook·tension·reveal·proof·joy·cta), order_index, scene_title, duration_ms, caption, **prompt_block jsonb**(i2i/t2i/i2v + negative + locks), canvas jsonb(x,y,z), image_asset_id?, video_asset_id? | v1에서 정규화 이중 기록 시작 |
+| `panels` | storyboard_id, **beat**(hook·tension·reveal·proof·joy·cta), order_index, scene_title, duration_ms, caption, **prompt_block jsonb**(CRAFT + negative + locks), **bindings jsonb**(슬롯 배열: role/ref_tag/anchor_id/asset_id/bindable/priority/required + continuity_out — video-production `reference_binding.json` 스키마 채택), canvas jsonb(x,y,z), image_asset_id?, video_asset_id? | v1에서 정규화 이중 기록 시작 |
 | `assets` | project_id, kind(reference·keyframe·video·**proof_doc**), storage_path, mime, width, height, source(upload·generated), generation_job_id? | proof_doc은 private bucket |
 | `generation_jobs` | project_id, user_id, **stage**(intake·patterns·storyboard·prompts·image·video_spec), model, input/output jsonb, credit_cost, status, error, timings | 원가 대시보드 소스 |
-| `claim_risk_logs` | project_id, panel_id?, claim_text, risk_level, proof_asset_id?, **ruling**(allowed·claim_safe_rewrite·blocked), reviewer_id?, resolved_at | qc_gate + prompt_and_risk 산출 |
+| `claim_risk_logs` | project_id, panel_id?, claim_text, risk_level, proof_asset_id?, **ruling**(allowed·claim_safe_rewrite·blocked), reviewer_id?, resolved_at | qc_gate + prompt_and_risk 산출. 생성물 QA의 Legal 행(예: 생성 영상에 판독 가능한 타사 브랜드 텍스트 노출 → FAIL)도 이 테이블에 기록 — video-production G2 QA에서 실증된 패턴 |
 | `qc_gate_results` | project_id, traceability jsonb, product_risk, proof_availability, forbidden_patterns[], reference_distance jsonb | 프로젝트당 1행(재실행 시 갱신) |
 | `patterns` | name, **source_family**(award·dolphiners·hybrid), matrix_keys jsonb(category/platform/audience/joy/proof/risk), beat_template jsonb, is_public, org_id?(커스텀), price?(마켓) | 마켓플레이스 대비 |
 | `credit_ledger` | user_id/org_id, delta, reason(stage·purchase·refund·plan_grant), job_id?, balance_after | append-only |
@@ -249,6 +256,7 @@ erDiagram
 
 1. **구독** (§3.1 표): Free / Pro ₩29,000 / Team ₩89,000·5석. 가격은 가설로 표기, 베타에서 검증.
 2. **AI 크레딧**: 스테이지별 정액 — intake 1cr, patterns 1cr, storyboard 3cr, prompts 0.5cr/컷, 이미지 생성 2cr/장, video spec 1cr. Gemini Flash 원가 기준 **마진 70%+ 설계**. 크레딧 팩 추가 구매 ₩11,000/100cr. BYO 키 사용 시 LLM 스테이지 크레딧 면제(플랫폼 기능은 구독 과금).
+   - **물량 기준점** *(video-production 실측 단위)*: 50초 B2B 광고 1편 = 스틸 26–36장(마스터·플레이트·스토리보드 프레임) + 비디오 클립 ~5개 + **상당한 재생성 churn**(동일 앵커 3회 재생성 사례). 크레딧 설계는 1편당 스틸 ~40장·클립 ~8회 생성을 표준 소비량으로 가정하고, QA FAIL 재생성을 크레딧 소모의 1급 시나리오로 취급한다(재생성 할인 또는 escrow 부분 환급 검토).
 3. **패턴 마켓플레이스 (v2)**: 검증된 패턴 템플릿(비트 템플릿 + 프롬프트 스타일) 판매, 제작자 70/30 배분. Team 커스텀 패턴 → 공개 판매 전환 퍼널.
 4. **오픈코어 경계**:
 
@@ -287,19 +295,36 @@ KPI 게이트: MVP→v1 = 주간 생성 프로젝트 50+ / Free→Pro 전환 3%+
 
 ---
 
-## 9. Open Questions — `contentscoin/video-production` 대조 후 확정
+## 9. Open Questions — `contentscoin/video-production` 대조 결과
 
-> 상태: **미확인** — 비공개 리포로 본 기획 세션에서 접근 승인이 전달되지 않아 보류. 접근 확보 시 각 항목을 해당 본문 섹션으로 이동하고 출처를 표기한다.
+> 상태: **대조 완료** (2026-07-06, 리포 커밋 `37c5210` 기준). 7건 중 5건 해소·본문 반영, 2건 잔여.
 
-| # | 질문 | 영향 섹션 |
+### 9.1 해소된 항목
+
+| # | 질문 | 결론 | 반영 위치 |
+|---|---|---|---|
+| 1 | 파이프라인 canonical 우선순위 | 리포의 실제 파이프라인은 14-step 선형이 아니라 **G0–G4 게이트 모델**. 기획 절반(스토리보드·키프레임·바인딩)은 실증 완료, 생성→조립→납품 절반은 수동/미실행. **스토리보드 생성 로직 = OpenCrab 5노드 워크플로우, 프로젝트 상태 관리 = 리포의 게이트 모델**로 역할 분담 | §2, §4.1-4 |
+| 2 | 잡스펙 슬롯 문법 | `@이미지1~9`/`@비디오1~3`/`@오디오1~3`, 총 12파일·프롬프트 3,500자 한도, 슬롯 = {role, ref_tag, anchor_id, path, bindable, priority, required} + continuity_out. `reference_binding.json` 스키마를 그대로 채택 | §2 Step 5, §5 panels.bindings |
+| 3(부분) | Seedance 연동 방식 | 공개 API 미검증, 수동 UI(Dreamina/CapCut)만 실증 → 커넥터는 "잡스펙 export 우선 + API 가용 엔진만 직접 호출" 2단 전략 | §2 Step 5 |
+| 4 | claim/QA 구조 재사용 | LOCK 컨벤션(기획·네이밍·프롬프트 freeze), per-shot PASS/FAIL 체크리스트, QA Legal 행(브랜드 텍스트 노출 FAIL 실사례), "증상→1줄 수정→재생성 1회" regen 테이블 — 모두 재사용. 비차단 오버라이드(FAIL에도 사용자 재량 진행+로그) 포함 | §5 claim_risk_logs, §2 Step 5 |
+| 5 | 조립 파이프라인 위치 | **ffmpeg 아님 — Remotion** (React 컴포지션: 클립 임포트·자막·가격카드·CTA). 실행은 Remotion Lambda 또는 별도 렌더 워커. 오디오는 엔진 SFX / Suno BGM / TTS VO / Remotion 수퍼로 레이어 분리 | §4.1-5 |
+
+### 9.2 잔여 항목
+
+| # | 질문 | 현황 |
 |---|---|---|
-| 1 | video-production의 파이프라인 구현(14-step)과 OpenCrab 워크플로우 정의 중 어느 쪽이 최신 canonical인가? 스테이지 이름/스키마 충돌 시 우선순위는? | §2 |
-| 2 | 잡스펙 슬롯 문법(`@image1`/`@video1`/`@audio1`)의 정확한 스키마 → `/api/generate/video-spec` 출력 계약 정합 | §2 Step 5, §4 |
-| 3 | Runway/Seedance 계정·과금 구조(자체 키 보유 여부) → v2 커넥터 metered 원가 산정 | §6 |
-| 4 | 기존 claim_risk_log 필드 정의와 QA regen_queue 데이터 구조 재사용 가능성 | §5 |
-| 5 | ffmpeg 조립/자막 파이프라인의 실행 위치(Vercel 서버리스 불가 → 별도 워커?) — v2 아키텍처 결정 | §4 |
-| 6 | 패턴 매트릭스 실데이터(award/Dolphiners 사례)의 저작권 상태 → 마켓플레이스 가능 범위 | §6 |
-| 7 | FMG 레퍼런스 프로젝트의 실측 원가/소요시간 → 크레딧 가격 검증 | §6 |
+| 6 | 패턴 매트릭스 실데이터(award/Dolphiners)의 저작권 상태 | 리포에는 해당 데이터 없음(OpenCrab 팩 측 자산). 리포에서 확인된 원칙: 참조 팩 구조 "미복제" 명시, 네거티브 프롬프트로 상표 안전 처리. **마켓플레이스 출시 전 OpenCrab 팩 라이선스 확인 필요** |
+| 7 | 실측 원가 → 크레딧 가격 검증 | 금액 데이터 없음(이미지 생성은 무과금 경로 사용, 유료 API 미가동). 단위 물량은 확보되어 §6에 반영. **베타 기간 generation_jobs 원가 대시보드로 실측 후 가격 확정** |
+
+### 9.3 대조에서 추가로 얻은 재사용 자산
+
+| 자산 | 출처 | SaaS 반영 |
+|---|---|---|
+| 25행 샷 매트릭스 스키마(클립/씬/샷ID/비트/카메라/키프레임/@바인딩 컬럼) | `08a-master-shot-matrix.md` | panels 정규화 컬럼·캔버스 표 뷰의 원형 |
+| CRAFT 프롬프트 프레임워크 + lock_suffix 배치 매니페스트 | `08c`, `batch1-manifest.json` | Step 4 프롬프트 블록 템플릿 |
+| 자산 네이밍 체계(`{BRAND}-{MCHAR\|MBG\|SB\|PLATE}-*`) + v1→v2 마이그레이션 맵 | `renewal-v2/04` | assets 테이블 네이밍 규칙 |
+| "클립=5비트 몽타주" 규칙과 렌더 실패 교훈(추상 앵커 → 샷별 스토리보드 PNG 바인딩) | `09`, `renewal-v2/00` | Step 5 잡스펙 기본 규칙 |
+| 오디오 레이어 분리(엔진 SFX/Suno BGM/VO/Remotion 수퍼) | `renewal-v2/05` | Step 5 후반 지시서 |
 
 ---
 
