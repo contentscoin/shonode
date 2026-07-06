@@ -1,11 +1,27 @@
 {
   "name": "shonode",
-  "private": true,
   "version": "0.1.0",
-  "description": "Shonode storyboard workspace with a local Gemini proxy server",
+  "description": "Open-source storyboard node canvas for planning AI-assisted commercial videos",
+  "license": "MIT",
+  "keywords": [
+    "storyboard",
+    "ai-video",
+    "node-canvas",
+    "gemini",
+    "creative-tools"
+  ],
+  "homepage": "https://github.com/etehofk1-ops/shonode#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/etehofk1-ops/shonode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/etehofk1-ops/shonode/issues"
+  },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check storyboard-proxy.js && node --check api/storyboard.js && node --check script.js && node --check shotboard-ai.js && node --check ai-client.js"
   },
   "engines": {
     "node": ">=20"
