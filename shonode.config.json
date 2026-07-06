@@ -1,0 +1,5 @@
+{
+  "_comment": "Public client configuration. Only values that are safe to ship to every browser belong here (the Supabase anon/publishable key is public by design; data access is protected by row-level security). SUPABASE_URL / SUPABASE_ANON_KEY environment variables take precedence over this file. Never put the Gemini key or a Supabase service-role key here.",
+  "supabaseUrl": "https://qpdivnasfyowkllyqzsb.supabase.co",
+  "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwZGl2bmFzZnlvd2tsbHlxenNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyOTU2OTIsImV4cCI6MjA5ODg3MTY5Mn0.xEhV4pgX7s9CCcbPvc5EFNJgVwCQ1dn8RNUjhuvHfvI"
+}
