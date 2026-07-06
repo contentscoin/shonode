@@ -1576,33 +1576,6 @@
     return Array.from(new Set(indexes));
   }
 
-  function getReferenceUsageMap() {
-    const usageMap = new Map();
-
-    panels.forEach((panel, index) => {
-      if (!panel.referenceImageId) {
-        return;
-      }
-
-      const usageList = usageMap.get(panel.referenceImageId) ?? [];
-      usageList.push(`S${String(index + 1).padStart(2, "0")}`);
-      usageMap.set(panel.referenceImageId, usageList);
-    });
-
-    return usageMap;
-  }
-
-  function persistAiReferenceImages() {
-    try {
-      window.sessionStorage.setItem(AI_REFERENCE_IMAGES_STORAGE_KEY, JSON.stringify(aiReferenceImages));
-      scheduleWorkspaceLibrarySync();
-      return true;
-    } catch {
-      setStatus("첨부 이미지가 많아서 모두 저장하지 못했습니다. 장수를 줄여주세요.", "warning");
-      return false;
-    }
-  }
-
   async function addAiReferenceFiles(files) {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     if (imageFiles.length === 0) {
@@ -1689,34 +1662,6 @@
   }
 
   } */
-
-  async function processAiReferenceFile(file) {
-    const dataUrl = await readFileAsDataUrl(file);
-    const image = await loadImageElement(dataUrl);
-    const maxSize = 720;
-    const ratio = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
-    const width = Math.max(1, Math.round(image.naturalWidth * ratio));
-    const height = Math.max(1, Math.round(image.naturalHeight * ratio));
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-      return null;
-    }
-
-    canvas.width = width;
-    canvas.height = height;
-    context.drawImage(image, 0, 0, width, height);
-
-    return {
-      id: createId(),
-      name: file.name,
-      mimeType: "image/jpeg",
-      width,
-      height,
-      dataUrl: canvas.toDataURL("image/jpeg", 0.78)
-    };
-  }
 
   function readFileAsDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -2319,67 +2264,10 @@
     previewVideoEmptyEl.classList.add("is-hidden");
   }
 
-  function renderAiOutputs() {
-    aiCutCountOutputEl.textContent = panels.length > 0 ? String(panels.length) : "-";
-    if (project.aiBrief?.trim()) {
-      const referenceMeta = aiReferenceImages.length > 0 ? ` · 레퍼런스 ${aiReferenceImages.length}장` : "";
-      aiPlanMetaEl.textContent = `${project.aiModel || "Gemini 2.5 Flash"} 기준 브리프 초안 준비 완료${referenceMeta}`;
-    } else {
-      aiPlanMetaEl.textContent = "브리프와 첨부 이미지를 넣으면 컷 흐름과 프롬프트가 카드로 펼쳐집니다.";
-    }
-
-    aiSummaryOutputEl.textContent = project.aiSummary?.trim()
-      ? project.aiSummary
-      : "브리프를 넣고 생성하면 전체 연출 방향이 여기에 정리됩니다.";
-
-    aiSequenceOutputEl.innerHTML = "";
-    panels.forEach((panel, index) => {
-      const item = document.createElement("article");
-      item.className = "sequence-item";
-      item.innerHTML = `
-        <span class="sequence-index">${index + 1}</span>
-        <div>
-          <strong>${escapeHtml(panel.sceneTitle || `컷 ${index + 1}`)}</strong>
-          <p>${escapeHtml(composeSequenceText(panel))}</p>
-        </div>
-      `;
-      aiSequenceOutputEl.appendChild(item);
-    });
-  }
-
   function composeSequenceText(panel) {
     const duration = panel.durationLabel ? `${panel.durationLabel} · ` : "";
     const caption = panel.caption || "설명이 아직 없습니다.";
     return `${duration}${caption.length > 88 ? `${caption.slice(0, 87)}…` : caption}`;
-  }
-
-  function renderSelectionDetail() {
-    const selectedPanels = panels.filter((panel) => selectedPanelIds.has(panel.id));
-    selectionDetailOutputEl.innerHTML = "";
-
-    if (selectedPanels.length === 0) {
-      selectionDetailOutputEl.textContent = "카드를 선택하면 이곳에 컷 설명과 프롬프트 요약이 표시됩니다.";
-      return;
-    }
-
-    if (selectedPanels.length > 1) {
-      selectionDetailOutputEl.textContent = `${selectedPanels.length}개의 컷이 선택되어 있습니다. 여러 컷의 흐름을 비교하거나 복제/삭제를 진행할 수 있습니다.`;
-      return;
-    }
-
-    const panel = selectedPanels[0];
-    const detail = document.createElement("article");
-    detail.className = "selection-detail-card";
-    detail.innerHTML = `
-      <strong>${escapeHtml(panel.sceneTitle || "선택한 컷")}</strong>
-      <p>${escapeHtml(panel.caption || "설명 없음")}</p>
-      <p>${escapeHtml([
-        panel.i2tPrompt ? `I2T ${panel.i2tPrompt.length}자` : "I2T 비어 있음",
-        panel.t2iPrompt ? `T2I ${panel.t2iPrompt.length}자` : "T2I 비어 있음",
-        panel.i2vStartPrompt || panel.i2vMotionPrompt || panel.i2vEndPrompt ? "I2V 준비됨" : "I2V 비어 있음"
-      ].join(" · "))}</p>
-    `;
-    selectionDetailOutputEl.appendChild(detail);
   }
 
   function renderConnections() {
@@ -2509,48 +2397,6 @@
     }
   }
 
-  function getGeneratingStages() {
-    if (aiReferenceImages.length > 0) {
-      return [
-        {
-          title: "첨부 이미지 분석 중",
-          hint: "업로드한 이미지를 읽고 유지할 요소와 바꿀 요소를 추출하고 있습니다."
-        },
-        {
-          title: "I2I 방향 정리 중",
-          hint: "기존 이미지에서 리디자인할 핵심 포인트를 I2T 프롬프트로 정리하고 있습니다."
-        },
-        {
-          title: "I2I·T2I·I2V 연결 중",
-          hint: "리디자인 결과가 이미지 생성과 영상 생성으로 자연스럽게 이어지도록 맞추고 있습니다."
-        },
-        {
-          title: "보드 반영 준비 중",
-          hint: "생성된 컷과 프롬프트를 카드에 정리하고 있습니다."
-        }
-      ];
-    }
-
-    return [
-      {
-        title: "브리프 해석 중",
-        hint: "러닝타임과 장면 분위기를 읽어 핵심 컷 수를 계산하고 있습니다."
-      },
-      {
-        title: "컷 흐름 설계 중",
-        hint: "훅부터 엔드 프레임까지 이어지는 장면 순서를 정리하고 있습니다."
-      },
-      {
-        title: "프롬프트 조립 중",
-        hint: "I2T, T2I, I2V에 들어갈 프롬프트를 모델별 흐름으로 맞추고 있습니다."
-      },
-      {
-        title: "보드 반영 준비 중",
-        hint: "생성된 카드 위치와 우측 아웃풋 패널을 함께 정리하고 있습니다."
-      }
-    ];
-  }
-
   function renderGeneratingStage(index = 0) {
     const stages = getGeneratingStages();
     const safeStage = stages[index % stages.length];
@@ -2592,45 +2438,6 @@
     window.clearInterval(aiGenerationIntervalId);
     aiGenerationIntervalId = null;
     renderAiOutputs();
-  }
-
-  function normalizePlan(rawPlan, payload) {
-    const rawCuts = Array.isArray(rawPlan?.cuts) ? rawPlan.cuts : [];
-    const cuts = rawCuts.length > 0 ? rawCuts : buildLocalStoryboardPlan(payload).cuts;
-    const projectDraft = normalizeProjectDraft(rawPlan?.projectDraft, payload, cuts);
-    return {
-      summary: typeof rawPlan?.summary === "string" && rawPlan.summary.trim()
-        ? rawPlan.summary.trim()
-        : "브리프를 기반으로 컷 흐름과 생성 프롬프트 초안을 만들었습니다.",
-      previewVideoUrl: typeof rawPlan?.previewVideoUrl === "string" ? rawPlan.previewVideoUrl : "",
-      previewPosterUrl: typeof rawPlan?.previewPosterUrl === "string" ? rawPlan.previewPosterUrl : "",
-      projectDraft,
-      cuts: cuts.map((cut, index) => {
-        const promptState = resolveCutImagePrompt(cut);
-        return {
-          sceneTitle: typeof cut.sceneTitle === "string" ? cut.sceneTitle : `${index + 1}. 컷`,
-          durationLabel: typeof cut.durationLabel === "string" ? cut.durationLabel : "",
-          caption: withDurationInCaption(
-            typeof cut.caption === "string" ? cut.caption : "",
-            typeof cut.durationLabel === "string" ? cut.durationLabel : ""
-          ),
-          i2tPrompt: typeof cut.i2tPrompt === "string"
-            ? cut.i2tPrompt
-            : buildI2TPrompt(
-              typeof cut.sceneTitle === "string" ? cut.sceneTitle : `${index + 1}. 컷`,
-              typeof cut.caption === "string" ? cut.caption : ""
-            ),
-          referenceImageIndexes: promptState.referenceImageIndexes,
-          referenceImageIndex: promptState.referenceImageIndexes[0] ?? -1,
-          imagePromptMode: promptState.imagePromptMode,
-          i2iPrompt: promptState.i2iPrompt,
-          t2iPrompt: promptState.t2iPrompt,
-          i2vStartPrompt: typeof cut.i2vStartPrompt === "string" ? cut.i2vStartPrompt : "",
-          i2vMotionPrompt: typeof cut.i2vMotionPrompt === "string" ? cut.i2vMotionPrompt : "",
-          i2vEndPrompt: typeof cut.i2vEndPrompt === "string" ? cut.i2vEndPrompt : ""
-        };
-      })
-    };
   }
 
   function normalizeProjectDraft(rawProjectDraft, payload, cuts) {
@@ -2699,88 +2506,10 @@
     return `${safeDuration} 분량. ${safeCaption}`.trim();
   }
 
-  function applyStoryboardPlan(plan, source) {
-    const nextPanels = plan.cuts.map((cut, index) => {
-      const position = getGeneratedPosition(index);
-      const existing = panels[index];
-      return createEmptyPanel({
-        id: existing?.id || createId(),
-        x: position.x,
-        y: position.y,
-        z: index + 1,
-        image: existing?.image || "",
-        fileName: existing?.fileName || "",
-        viewMode: existing?.image ? "i2t" : "t2i",
-        i2tCollapsed: true,
-        t2iCollapsed: true,
-        i2vCollapsed: true,
-        sceneTitle: cut.sceneTitle,
-        durationLabel: cut.durationLabel,
-        caption: cut.caption,
-        i2tPrompt: cut.i2tPrompt,
-        t2iPrompt: cut.t2iPrompt,
-        i2vStartPrompt: cut.i2vStartPrompt,
-        i2vMotionPrompt: cut.i2vMotionPrompt,
-        i2vEndPrompt: cut.i2vEndPrompt,
-        nextPanelIds: []
-      });
-    });
-
-    for (let index = 0; index < nextPanels.length - 1; index += 1) {
-      nextPanels[index].nextPanelIds = [nextPanels[index + 1].id];
-    }
-
-    panels = nextPanels.map((panel, index) => normalizePanel(panel, index));
-    project = normalizeProject({
-      ...project,
-      title: plan.projectDraft.title || project.title,
-      sequence: plan.projectDraft.sequence || project.sequence,
-      runtime: plan.projectDraft.runtime || project.runtime,
-      tone: plan.projectDraft.tone || project.tone,
-      logline: plan.projectDraft.logline || project.logline,
-      notes: plan.projectDraft.notes || project.notes,
-      aiSummary: plan.summary,
-      previewVideoUrl: plan.previewVideoUrl || project.previewVideoUrl,
-      previewPosterUrl: plan.previewPosterUrl || project.previewPosterUrl
-    });
-    selectedPanelIds = new Set(nextPanels.length > 0 ? [nextPanels[0].id] : []);
-    persistPanels();
-    persistProject();
-    renderProjectSidebar();
-    setSidebarSections("right", plan.previewVideoUrl ? ["video", "output"] : ["output"], false);
-    renderPanels({ restoreView: true });
-    setStatus(source === "api" ? "AI 응답으로 콘티 초안을 반영했습니다." : "로컬 초안으로 콘티를 구성했습니다.");
-  }
-
   function getGeneratedPosition(index) {
     return {
       x: PANEL_MARGIN + index * 392,
       y: PANEL_SAFE_TOP + 20
-    };
-  }
-
-  function buildLocalStoryboardPlan(payload) {
-    const duration = extractDuration(payload.brief);
-    const average = Math.round((duration.min + duration.max) / 2);
-    const cutCount = average <= 20 ? 5 : average <= 30 ? 6 : 8;
-    const subject = payload.brief.split(/[.!?]/)[0].trim() || "premium equestrian fashion commercial";
-    const mood = payload.brief.includes("차갑") ? "cool toned, refined, controlled" : "premium, elegant, cinematic";
-    const secondsPerCut = Math.max(2, (average / cutCount).toFixed(1));
-    const names = ["브랜드 훅", "룩 디테일", "주인공 등장", "움직임 강조", "브랜드 아이콘", "엔드 프레임", "보조 컷", "보조 엔드"];
-
-    return {
-      summary: `총 ${cutCount}컷이 적당합니다. ${duration.min}초~${duration.max}초 안에서 컷당 약 ${secondsPerCut}초로 운영하면 훅, 디테일, 움직임, 엔드 프레임까지 자연스럽게 이어집니다.`,
-      projectDraft: buildProjectDraft(payload, duration),
-      cuts: Array.from({ length: cutCount }, (_, index) => ({
-        sceneTitle: `${index + 1}. ${names[index] || `컷 ${index + 1}`}`,
-        durationLabel: `약 ${secondsPerCut}초`,
-        caption: `약 ${secondsPerCut}초 분량. ${names[index] || `컷 ${index + 1}`}의 역할을 맡는 장면으로 ${subject}의 무드와 브랜드 태도를 또렷하게 보여준다.`,
-        i2tPrompt: buildI2TPrompt(`${index + 1}. ${names[index] || `컷 ${index + 1}`}`, `${subject}, ${names[index] || `shot ${index + 1}`}, ${mood}`),
-        t2iPrompt: `${subject}, ${names[index] || `shot ${index + 1}`}, premium Korean equestrian fashion commercial still, ${mood}, editorial luxury campaign image, detailed fabric texture, cinematic composition, no text, no watermark`,
-        i2vStartPrompt: `${subject}, ${names[index] || `shot ${index + 1}`}, start frame, ${mood}, polished fashion-commercial frame`,
-        i2vMotionPrompt: `controlled camera motion, elegant pacing, preserve anatomy and costume detail, premium commercial rhythm`,
-        i2vEndPrompt: `${subject}, ${names[index] || `shot ${index + 1}`}, end frame, refined premium ad finish`
-      }))
     };
   }
 
@@ -2797,15 +2526,6 @@
     }
 
     return { min: 15, max: 30 };
-  }
-
-  function buildI2TPrompt(sceneTitle, contextText) {
-    const scene = typeof sceneTitle === "string" && sceneTitle.trim() ? sceneTitle.trim() : "shot";
-    const context = typeof contextText === "string" && contextText.trim()
-      ? contextText.trim()
-      : "premium commercial redesign";
-
-    return `Analyze the provided reference image for ${scene}. Extract the core subject, silhouette, styling anchors, composition, emotional tone, and brand-signature details. Keep what should remain recognizable, clearly note what should be redesigned, and rewrite the frame as a premium commercial still direction. Output should support a redesign flow from existing image to T2I and then I2V. Context: ${context}`;
   }
 
   function renderSelectionDetail() {
@@ -3048,34 +2768,6 @@
     };
   }
 
-  function renderAiReferenceImages() {
-    if (!aiReferenceListEl || !aiReferenceCountEl) {
-      return;
-    }
-
-    aiReferenceCountEl.textContent = `${aiReferenceImages.length} / ${AI_REFERENCE_IMAGE_LIMIT}`;
-    aiReferenceListEl.innerHTML = "";
-    aiReferenceListEl.hidden = aiReferenceImages.length === 0;
-
-    aiReferenceImages.forEach((image, imageIndex) => {
-      const item = document.createElement("article");
-      item.className = "ai-reference-item";
-      item.innerHTML = `
-        <img class="ai-reference-thumb" src="${escapeHtml(image.dataUrl)}" alt="${escapeHtml(image.name || "첨부 이미지")}">
-        <button class="ai-reference-remove" type="button" data-reference-remove="${escapeHtml(image.id)}" aria-label="첨부 이미지 삭제" title="첨부 이미지 삭제">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 6L18 18M18 6L6 18"></path>
-          </svg>
-        </button>
-        <div class="ai-reference-meta">
-          <strong class="ai-reference-name">${escapeHtml(image.name || "reference.jpg")}</strong>
-          <span class="ai-reference-size">${escapeHtml(`${image.width}×${image.height}`)}</span>
-        </div>
-      `;
-      aiReferenceListEl.appendChild(item);
-    });
-  }
-
   async function processAiReferenceFile(file) {
     const dataUrl = await readFileAsDataUrl(file);
     const image = await loadImageElement(dataUrl);
@@ -3200,109 +2892,6 @@
     if (referenceLightboxMetaEl) {
       referenceLightboxMetaEl.textContent = "";
     }
-  }
-
-  function renderAiReferenceImages() {
-    if (!aiReferenceCountEl || !aiReferenceDropzoneEl) {
-      return;
-    }
-
-    const count = aiReferenceImages.length;
-    const usageMap = getReferenceUsageMap();
-    aiReferenceCountEl.textContent = `${count} / ${AI_REFERENCE_IMAGE_LIMIT}`;
-
-    if (aiReferenceListEl) {
-      aiReferenceListEl.innerHTML = "";
-      aiReferenceListEl.hidden = true;
-    }
-
-    if (!aiReferenceInlineGridEl) {
-      aiReferenceDropzoneEl.classList.toggle("has-images", false);
-      return;
-    }
-
-    aiReferenceInlineGridEl.innerHTML = "";
-    aiReferenceInlineGridEl.hidden = count === 0;
-    aiReferenceDropzoneEl.classList.toggle("has-images", count > 0);
-    aiReferenceDropzoneEl.style.setProperty("--reference-thumb-size", `${getAiReferenceThumbSize(count)}px`);
-
-    aiReferenceImages.forEach((image) => {
-      const item = document.createElement("article");
-      item.className = "ai-reference-inline-item";
-      item.title = image.name || "reference image";
-      item.dataset.referencePreview = image.id;
-      item.setAttribute("role", "button");
-      item.setAttribute("tabindex", "0");
-      item.setAttribute("aria-label", `${image.name || "첨부 이미지"} 확대 보기`);
-      item.innerHTML = `
-        <img class="ai-reference-inline-thumb" src="${escapeHtml(image.dataUrl)}" alt="${escapeHtml(image.name || "첨부 이미지")}">
-        <button class="ai-reference-inline-remove" type="button" data-reference-remove="${escapeHtml(image.id)}" aria-label="첨부 이미지 삭제" title="첨부 이미지 삭제">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 6L18 18M18 6L6 18"></path>
-          </svg>
-        </button>
-      `;
-      aiReferenceInlineGridEl.appendChild(item);
-    });
-  }
-
-  function renderAiReferenceImages() {
-    if (!aiReferenceCountEl || !aiReferenceDropzoneEl) {
-      return;
-    }
-
-    const count = aiReferenceImages.length;
-    const usageMap = getReferenceUsageMap();
-    aiReferenceCountEl.textContent = `${count} / ${AI_REFERENCE_IMAGE_LIMIT}`;
-
-    if (aiReferenceListEl) {
-      aiReferenceListEl.innerHTML = "";
-      aiReferenceListEl.hidden = true;
-    }
-
-    if (!aiReferenceInlineGridEl) {
-      aiReferenceDropzoneEl.classList.toggle("has-images", false);
-      return;
-    }
-
-    aiReferenceInlineGridEl.innerHTML = "";
-    aiReferenceInlineGridEl.hidden = count === 0;
-    aiReferenceDropzoneEl.classList.toggle("has-images", count > 0);
-    aiReferenceDropzoneEl.style.setProperty("--reference-thumb-size", `${getAiReferenceThumbSize(count)}px`);
-
-    aiReferenceImages.forEach((image, imageIndex) => {
-      const orderLabel = String(imageIndex + 1).padStart(2, "0");
-      const usageLabels = usageMap.get(image.id) ?? [];
-      const visibleUsageLabels = usageLabels.slice(0, 2);
-      const extraUsageCount = Math.max(0, usageLabels.length - visibleUsageLabels.length);
-      const item = document.createElement("article");
-      item.className = "ai-reference-inline-item";
-      item.title = image.name || "reference image";
-      item.dataset.referencePreview = image.id;
-      item.setAttribute("role", "button");
-      item.setAttribute("tabindex", "0");
-      item.setAttribute("aria-label", `${image.name || "첨부 이미지"} 확대 보기`);
-      item.style.setProperty("--reference-accent-rgb", image.accentRgb || "37 99 235");
-      item.innerHTML = `
-        <span class="ai-reference-inline-order">${orderLabel}</span>
-        <div class="ai-reference-inline-photo">
-          <img class="ai-reference-inline-thumb" src="${escapeHtml(image.dataUrl)}" alt="${escapeHtml(image.name || "첨부 이미지")}">
-        </div>
-        <button class="ai-reference-inline-remove" type="button" data-reference-remove="${escapeHtml(image.id)}" aria-label="첨부 이미지 삭제" title="첨부 이미지 삭제">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 6L18 18M18 6L6 18"></path>
-          </svg>
-        </button>
-        <div class="ai-reference-inline-footer">
-          <span class="ai-reference-inline-ref">REF ${orderLabel}</span>
-          <div class="ai-reference-inline-scenes">
-            ${visibleUsageLabels.map((label) => `<span class="ai-reference-inline-scene-tag">${escapeHtml(label)}</span>`).join("")}
-            ${extraUsageCount > 0 ? `<span class="ai-reference-inline-scene-tag">+${extraUsageCount}</span>` : ""}
-          </div>
-        </div>
-      `;
-      aiReferenceInlineGridEl.appendChild(item);
-    });
   }
 
   function renderAiOutputs() {
