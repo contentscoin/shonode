@@ -12,6 +12,12 @@
   const WORKSPACE_LIBRARY_DB_NAME = "shonode-workspace-library-db-v1";
   const WORKSPACE_LIBRARY_DB_STORE_NAME = "workspace-snapshots";
   const AI_REFERENCE_IMAGE_LIMIT = 10;
+  const WORKSPACE_EXPORT_VERSION = "shonode-workspace-v2";
+  const PANEL_BEATS = ["hook", "tension", "reveal", "proof", "joy", "cta"];
+  const PATTERN_SOURCE_FAMILIES = ["award", "dolphiners", "hybrid"];
+  const CLAIM_RISK_LEVELS = ["low", "proof_required", "high"];
+  const CLAIM_RULINGS = ["allowed", "claim_safe_rewrite", "blocked"];
+  const CLAIM_LOG_LIMIT = 200;
 
   const aiBriefInputEl = document.getElementById("aiBriefInput");
   const aiModelInputEl = document.getElementById("aiModelInput");
@@ -118,7 +124,9 @@
       referenceWeight: "2.0",
       aiSummary: "",
       previewVideoUrl: "",
-      previewPosterUrl: ""
+      previewPosterUrl: "",
+      pattern: null,
+      claimLog: []
     };
   };
 
@@ -131,9 +139,45 @@
       referenceWeight: sanitizeReferenceWeight(candidate?.referenceWeight),
       aiSummary: typeof candidate?.aiSummary === "string" ? candidate.aiSummary : "",
       previewVideoUrl: typeof candidate?.previewVideoUrl === "string" ? candidate.previewVideoUrl : "",
-      previewPosterUrl: typeof candidate?.previewPosterUrl === "string" ? candidate.previewPosterUrl : ""
+      previewPosterUrl: typeof candidate?.previewPosterUrl === "string" ? candidate.previewPosterUrl : "",
+      pattern: sanitizeProjectPattern(candidate?.pattern),
+      claimLog: sanitizeClaimLog(candidate?.claimLog)
     };
   };
+
+  function sanitizeProjectPattern(candidate) {
+    if (!candidate || typeof candidate !== "object") {
+      return null;
+    }
+
+    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+    if (!id && !name) {
+      return null;
+    }
+
+    return {
+      id,
+      name,
+      sourceFamily: PATTERN_SOURCE_FAMILIES.includes(candidate.sourceFamily) ? candidate.sourceFamily : ""
+    };
+  }
+
+  function sanitizeClaimLog(candidate) {
+    if (!Array.isArray(candidate)) {
+      return [];
+    }
+
+    return candidate
+      .filter((entry) => entry && typeof entry === "object" && typeof entry.claimText === "string" && entry.claimText.trim())
+      .slice(0, CLAIM_LOG_LIMIT)
+      .map((entry) => ({
+        claimText: entry.claimText,
+        riskLevel: CLAIM_RISK_LEVELS.includes(entry.riskLevel) ? entry.riskLevel : "low",
+        ruling: CLAIM_RULINGS.includes(entry.ruling) ? entry.ruling : "allowed",
+        panelId: typeof entry.panelId === "string" ? entry.panelId : ""
+      }));
+  }
 
   cloneProject = function overrideCloneProject(projectValue = project) {
     return {
@@ -143,7 +187,9 @@
       referenceWeight: sanitizeReferenceWeight(projectValue.referenceWeight),
       aiSummary: projectValue.aiSummary ?? "",
       previewVideoUrl: projectValue.previewVideoUrl ?? "",
-      previewPosterUrl: projectValue.previewPosterUrl ?? ""
+      previewPosterUrl: projectValue.previewPosterUrl ?? "",
+      pattern: projectValue.pattern ? { ...projectValue.pattern } : null,
+      claimLog: Array.isArray(projectValue.claimLog) ? projectValue.claimLog.map((entry) => ({ ...entry })) : []
     };
   };
 
@@ -151,6 +197,7 @@
     return originalCreateEmptyPanel({
       sceneTitle: "",
       durationLabel: "",
+      beat: "",
       viewMode: "image",
       imagePromptMode: "i2i",
       t2iCollapsed: false,
@@ -185,6 +232,7 @@
       ...base,
       sceneTitle: typeof panel?.sceneTitle === "string" ? panel.sceneTitle : "",
       durationLabel: typeof panel?.durationLabel === "string" ? panel.durationLabel : "",
+      beat: PANEL_BEATS.includes(panel?.beat) ? panel.beat : "",
       viewMode: ["image", "t2i", "i2v", "vid"].includes(panel?.viewMode)
         ? panel.viewMode
         : panel?.viewMode === "i2t"
@@ -849,7 +897,7 @@
 
   function buildEmptyWorkspaceSnapshot() {
     return {
-      version: "shonode-workspace-v1",
+      version: WORKSPACE_EXPORT_VERSION,
       exportedAt: new Date().toISOString(),
       project: normalizeProject({
         ...getDefaultProject(),
@@ -3170,7 +3218,7 @@
 
   function createWorkspaceExportSnapshot() {
     return {
-      version: "shonode-workspace-v1",
+      version: WORKSPACE_EXPORT_VERSION,
       exportedAt: new Date().toISOString(),
       project: cloneProject(),
       panels: panels.map((panel, index) => normalizePanel(panel, index)),

@@ -84,20 +84,22 @@ For public deployments, add your own production controls before sharing widely:
 
 Shonode exports projects as `.shonode` files.
 
-The file is a JSON-based workspace snapshot containing:
+The file is a JSON-based workspace snapshot (current version: `shonode-workspace-v2`) containing:
 
-- project metadata
-- card content and positions
+- project metadata (including optional creative `pattern` and `claimLog` entries)
+- card content and positions (including optional six-beat `beat` labels)
 - prompts
 - reference images
 - selection state
 - zoom / scroll state
 - sidebar state
 
-Import supports both:
+Import supports:
 
-- `.shonode`
+- `.shonode` (`shonode-workspace-v2` and older `shonode-workspace-v1` snapshots)
 - legacy `.json` workspace backups
+
+Older snapshots are migrated on import: missing v2 fields fall back to safe defaults.
 
 ## Main files
 
