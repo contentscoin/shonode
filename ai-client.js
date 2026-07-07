@@ -1,15 +1,74 @@
 const shonodeAiClient = {
   model: "gemini-2.5-flash",
+  openaiModel: "gpt-4o-mini",
   headers: {},
 
-  get endpoint() {
-    const baseOrigin = window.location.protocol === "file:"
+  // Provider settings live in localStorage so users can bring their own key.
+  // "gemini-server" uses the operator's server-side key; "openai-byok" sends
+  // the user's OpenAI key per request (stored only in this browser).
+  // A future "openai-oauth" provider (Sign in with ChatGPT) can plug in here
+  // by returning an OAuth access token from getProviderSettings().
+  PROVIDER_STORAGE_KEY: "shonode-ai-provider-v1",
+  OPENAI_KEY_STORAGE_KEY: "shonode-openai-key-v1",
+  OPENAI_MODEL_STORAGE_KEY: "shonode-openai-model-v1",
+
+  get baseOrigin() {
+    return window.location.protocol === "file:"
       ? "http://127.0.0.1:4173"
       : window.location.origin;
-    return `${baseOrigin}/api/storyboard`;
+  },
+
+  get endpoint() {
+    return `${this.baseOrigin}/api/storyboard`;
+  },
+
+  get openaiEndpoint() {
+    return `${this.baseOrigin}/api/storyboard-openai`;
+  },
+
+  getProviderSettings() {
+    let provider = "gemini-server";
+    let openaiKey = "";
+    let openaiModel = "";
+    try {
+      provider = window.localStorage.getItem(this.PROVIDER_STORAGE_KEY) || "gemini-server";
+      openaiKey = window.localStorage.getItem(this.OPENAI_KEY_STORAGE_KEY) || "";
+      openaiModel = window.localStorage.getItem(this.OPENAI_MODEL_STORAGE_KEY) || "";
+    } catch {
+      // storage unavailable -> defaults
+    }
+    return {
+      provider: provider === "openai-byok" ? "openai-byok" : "gemini-server",
+      openaiKey: openaiKey.trim(),
+      openaiModel: openaiModel.trim() || this.openaiModel
+    };
+  },
+
+  setProviderSettings({ provider, openaiKey, openaiModel }) {
+    try {
+      if (provider !== undefined) {
+        window.localStorage.setItem(this.PROVIDER_STORAGE_KEY, provider);
+      }
+      if (openaiKey !== undefined) {
+        window.localStorage.setItem(this.OPENAI_KEY_STORAGE_KEY, openaiKey);
+      }
+      if (openaiModel !== undefined) {
+        window.localStorage.setItem(this.OPENAI_MODEL_STORAGE_KEY, openaiModel);
+      }
+    } catch {
+      // ignore storage failures
+    }
   },
 
   async generateStoryboard(payload) {
+    const settings = this.getProviderSettings();
+    if (settings.provider === "openai-byok") {
+      if (!settings.openaiKey) {
+        throw new Error("OpenAI API 키가 설정되지 않았습니다. 왼쪽 AI 패널에서 키를 입력해주세요.");
+      }
+      return this.generateStoryboardOpenAI(payload, settings);
+    }
+
     const response = await fetch(this.endpoint, {
       method: "POST",
       headers: {
@@ -29,6 +88,64 @@ const shonodeAiClient = {
 
     const result = await response.json();
     return this.mapResponse(result);
+  },
+
+  async generateStoryboardOpenAI(payload, settings) {
+    const response = await fetch(this.openaiEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-openai-key": settings.openaiKey,
+        ...this.headers
+      },
+      body: JSON.stringify({
+        model: settings.openaiModel,
+        request: this.buildOpenAIRequest(payload)
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Shonode OpenAI proxy failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+    return this.mapOpenAIResponse(result);
+  },
+
+  buildOpenAIRequest(payload) {
+    const content = [
+      {
+        type: "text",
+        text: this.buildPrompt(payload)
+      }
+    ];
+
+    (payload?.referenceImages || []).forEach((image) => {
+      if (typeof image?.dataUrl === "string" && /^data:image\//i.test(image.dataUrl)) {
+        content.push({
+          type: "image_url",
+          image_url: { url: image.dataUrl }
+        });
+      }
+    });
+
+    return {
+      messages: [
+        {
+          role: "user",
+          content
+        }
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "shonode_storyboard_plan",
+          schema: this.buildPlanJsonSchema()
+        }
+      },
+      max_tokens: 8192
+    };
   },
 
   buildRequest(payload) {
@@ -54,62 +171,66 @@ const shonodeAiClient = {
       ],
       generationConfig: {
         responseMimeType: "application/json",
-        responseJsonSchema: {
+        responseJsonSchema: this.buildPlanJsonSchema()
+      }
+    };
+  },
+
+  buildPlanJsonSchema() {
+    return {
+      type: "object",
+      properties: {
+        summary: { type: "string" },
+        previewVideoUrl: { type: "string" },
+        previewPosterUrl: { type: "string" },
+        projectDraft: {
           type: "object",
           properties: {
-            summary: { type: "string" },
-            previewVideoUrl: { type: "string" },
-            previewPosterUrl: { type: "string" },
-            projectDraft: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                sequence: { type: "string" },
-                runtime: { type: "string" },
-                tone: { type: "string" },
-                logline: { type: "string" },
-                notes: { type: "string" }
-              },
-              required: ["title", "sequence", "runtime", "tone", "logline", "notes"]
-            },
-            cuts: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  sceneTitle: { type: "string" },
-                  durationLabel: { type: "string" },
-                  caption: { type: "string" },
-                  referenceImageIndex: { type: "integer" },
-                  referenceImageIndexes: {
-                    type: "array",
-                    items: { type: "integer" }
-                  },
-                  imagePromptMode: { type: "string" },
-                  i2iPrompt: { type: "string" },
-                  t2iPrompt: { type: "string" },
-                  i2vStartPrompt: { type: "string" },
-                  i2vMotionPrompt: { type: "string" },
-                  i2vEndPrompt: { type: "string" }
-                },
-                required: [
-                  "sceneTitle",
-                  "durationLabel",
-                  "caption",
-                  "referenceImageIndexes",
-                  "imagePromptMode",
-                  "i2iPrompt",
-                  "t2iPrompt",
-                  "i2vStartPrompt",
-                  "i2vMotionPrompt",
-                  "i2vEndPrompt"
-                ]
-              }
-            }
+            title: { type: "string" },
+            sequence: { type: "string" },
+            runtime: { type: "string" },
+            tone: { type: "string" },
+            logline: { type: "string" },
+            notes: { type: "string" }
           },
-          required: ["summary", "projectDraft", "cuts"]
+          required: ["title", "sequence", "runtime", "tone", "logline", "notes"]
+        },
+        cuts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              sceneTitle: { type: "string" },
+              durationLabel: { type: "string" },
+              caption: { type: "string" },
+              referenceImageIndex: { type: "integer" },
+              referenceImageIndexes: {
+                type: "array",
+                items: { type: "integer" }
+              },
+              imagePromptMode: { type: "string" },
+              i2iPrompt: { type: "string" },
+              t2iPrompt: { type: "string" },
+              i2vStartPrompt: { type: "string" },
+              i2vMotionPrompt: { type: "string" },
+              i2vEndPrompt: { type: "string" }
+            },
+            required: [
+              "sceneTitle",
+              "durationLabel",
+              "caption",
+              "referenceImageIndexes",
+              "imagePromptMode",
+              "i2iPrompt",
+              "t2iPrompt",
+              "i2vStartPrompt",
+              "i2vMotionPrompt",
+              "i2vEndPrompt"
+            ]
+          }
         }
-      }
+      },
+      required: ["summary", "projectDraft", "cuts"]
     };
   },
 
@@ -343,6 +464,29 @@ const shonodeAiClient = {
       throw new Error(`Gemini JSON parse failed: ${error.message}`);
     }
 
+    return this.mapParsedPlan(parsed);
+  },
+
+  mapOpenAIResponse(result) {
+    const candidateText = typeof result?.choices?.[0]?.message?.content === "string"
+      ? result.choices[0].message.content.trim()
+      : "";
+
+    if (!candidateText) {
+      throw new Error("OpenAI returned no text content.");
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(candidateText);
+    } catch (error) {
+      throw new Error(`OpenAI JSON parse failed: ${error.message}`);
+    }
+
+    return this.mapParsedPlan(parsed);
+  },
+
+  mapParsedPlan(parsed) {
     const cuts = Array.isArray(parsed?.cuts)
       ? parsed.cuts.map((cut) => {
         const referenceImageIndexes = this.normalizeReferenceImageIndexes(

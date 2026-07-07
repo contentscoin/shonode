@@ -113,6 +113,15 @@ Older snapshots are migrated on import: missing v2 fields fall back to safe defa
 - `api/storyboard.js` — Vercel serverless entry point
 - `brand/` — Shonode logo and mark assets
 
+## AI providers
+
+Storyboard generation supports two providers, selected in the AI panel:
+
+- **Gemini (server key, default)** — the operator sets `GEMINI_API_KEY`; requests go through `/api/storyboard`.
+- **OpenAI GPT (bring your own key)** — each user pastes their own OpenAI API key in the AI panel. The key is stored only in that user's browser (`localStorage`), sent per request as a header to `/api/storyboard-openai`, forwarded once to OpenAI, and never persisted or logged server-side. Default model `gpt-4o-mini` (editable). `OPENAI_BASE_URL` can point the proxy at a compatible upstream for testing.
+
+The provider layer is designed so an OAuth-token provider (e.g. OpenAI's "Sign in with ChatGPT", which requires developer-program approval) can be added later without reworking the request flow.
+
 ## Cloud mode (optional, Supabase)
 
 Shonode runs fully local by default. Setting two environment variables enables an optional cloud mode with account login and cloud project storage:

@@ -21,6 +21,11 @@
 
   const aiBriefInputEl = document.getElementById("aiBriefInput");
   const aiModelInputEl = document.getElementById("aiModelInput");
+  const aiProviderSelectEl = document.getElementById("aiProviderSelect");
+  const openaiKeyFieldEl = document.getElementById("openaiKeyField");
+  const openaiKeyInputEl = document.getElementById("openaiKeyInput");
+  const openaiModelFieldEl = document.getElementById("openaiModelField");
+  const openaiModelInputEl = document.getElementById("openaiModelInput");
   const aiCutCountOutputEl = document.getElementById("aiCutCountOutput");
   const aiPlanMetaEl = document.getElementById("aiPlanMeta");
   const aiGenerationIndicatorEl = document.getElementById("aiGenerationIndicator");
@@ -688,6 +693,45 @@
   window.addEventListener("keydown", handleLinkKeyDown);
   initializeSidebarRails();
   initializeReferenceImages();
+  initializeAiProviderControls();
+
+  function initializeAiProviderControls() {
+    const aiClient = window.ShonodeAI || window.ShotBoardAI;
+    if (!aiProviderSelectEl || !aiClient?.getProviderSettings) {
+      return;
+    }
+
+    const settings = aiClient.getProviderSettings();
+    aiProviderSelectEl.value = settings.provider;
+    if (openaiKeyInputEl) {
+      openaiKeyInputEl.value = settings.openaiKey;
+    }
+    if (openaiModelInputEl && settings.openaiModel !== aiClient.openaiModel) {
+      openaiModelInputEl.value = settings.openaiModel;
+    }
+    syncAiProviderVisibility(settings.provider);
+
+    aiProviderSelectEl.addEventListener("change", () => {
+      aiClient.setProviderSettings({ provider: aiProviderSelectEl.value });
+      syncAiProviderVisibility(aiProviderSelectEl.value);
+    });
+    openaiKeyInputEl?.addEventListener("change", () => {
+      aiClient.setProviderSettings({ openaiKey: openaiKeyInputEl.value.trim() });
+    });
+    openaiModelInputEl?.addEventListener("change", () => {
+      aiClient.setProviderSettings({ openaiModel: openaiModelInputEl.value.trim() });
+    });
+  }
+
+  function syncAiProviderVisibility(provider) {
+    const isOpenAI = provider === "openai-byok";
+    if (openaiKeyFieldEl) {
+      openaiKeyFieldEl.hidden = !isOpenAI;
+    }
+    if (openaiModelFieldEl) {
+      openaiModelFieldEl.hidden = !isOpenAI;
+    }
+  }
 
   window.ShonodeWorkspaceBridge = {
     ...(window.ShonodeWorkspaceBridge || {}),

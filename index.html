@@ -166,6 +166,24 @@
 
             <div class="sidebar-grid sidebar-grid--ai">
               <label class="sidebar-field">
+                <span class="sidebar-label">AI 제공자</span>
+                <select id="aiProviderSelect" class="sidebar-input">
+                  <option value="gemini-server">Gemini (서버 기본)</option>
+                  <option value="openai-byok">OpenAI GPT (내 API 키)</option>
+                </select>
+              </label>
+
+              <label id="openaiKeyField" class="sidebar-field" hidden>
+                <span class="sidebar-label">OpenAI API 키 (브라우저에만 저장)</span>
+                <input id="openaiKeyInput" class="sidebar-input" type="password" placeholder="sk-..." autocomplete="off">
+              </label>
+
+              <label id="openaiModelField" class="sidebar-field" hidden>
+                <span class="sidebar-label">OpenAI 모델</span>
+                <input id="openaiModelInput" class="sidebar-input" type="text" placeholder="gpt-4o-mini">
+              </label>
+
+              <label class="sidebar-field">
                 <span class="sidebar-label">AI 모델 메모</span>
                 <input id="aiModelInput" class="sidebar-input" type="text" value="Gemini 2.5 Flash">
               </label>

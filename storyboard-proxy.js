@@ -271,5 +271,9 @@ function sendJson(response, statusCode, payload) {
 
 module.exports = {
   handleStoryboardProxy,
-  sendJson
+  sendJson,
+  getOriginPolicy,
+  readJsonBody,
+  sanitizeModel,
+  getHeaderValue
 };
