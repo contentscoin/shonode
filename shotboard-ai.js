@@ -14,6 +14,18 @@
   const AI_REFERENCE_IMAGE_LIMIT = 10;
   const WORKSPACE_EXPORT_VERSION = "shonode-workspace-v2";
   const PANEL_BEATS = ["hook", "tension", "reveal", "proof", "joy", "cta"];
+  // Single source of truth for six-beat metadata (Korean label + color).
+  // PANEL_BEATS defines canonical order; BEAT_META defines label/color.
+  // Keep keys identical to PANEL_BEATS so the badge, the coverage panel,
+  // and the reassign control never drift.
+  const BEAT_META = {
+    hook: { label: "훅", color: "#EC4899" },
+    tension: { label: "긴장", color: "#F97316" },
+    reveal: { label: "반전", color: "#8B5CF6" },
+    proof: { label: "증명", color: "#0EA5E9" },
+    joy: { label: "환희", color: "#22C55E" },
+    cta: { label: "전환(CTA)", color: "#EF4444" }
+  };
   const PATTERN_SOURCE_FAMILIES = ["award", "dolphiners", "hybrid"];
   const CLAIM_RISK_LEVELS = ["low", "proof_required", "high"];
   const CLAIM_RULINGS = ["allowed", "claim_safe_rewrite", "blocked"];
@@ -49,6 +61,7 @@
   const aiReferenceWeightInputEl = document.getElementById("aiReferenceWeightInput");
   const aiSummaryOutputEl = document.getElementById("aiSummaryOutput");
   const aiSequenceOutputEl = document.getElementById("aiSequenceOutput");
+  const beatCoverageOutputEl = document.getElementById("beatCoverageOutput");
   const selectionDetailOutputEl = document.getElementById("selectionDetailOutput");
   const generatePlanButtonEl = document.getElementById("generatePlanButton");
   const generatePlanButtonLabelEl = document.getElementById("generatePlanButtonLabel");
@@ -291,6 +304,7 @@
     renderAiReferenceImages();
     renderAiOutputs();
     renderPreviewSidebar();
+    renderBeatCoverage();
   };
 
   persistProject = function overridePersistProject(...args) {
@@ -319,6 +333,7 @@
     if (options.rerender === false) {
       renderAiOutputs();
       renderSelectionDetail();
+      renderBeatCoverage();
     }
   };
 
@@ -409,6 +424,7 @@
     const sceneLabelEl = fragment.querySelector(".panel-scene-label");
     const titleEl = fragment.querySelector(".panel-title");
     const durationEl = fragment.querySelector(".panel-duration");
+    const beatBadgeEl = fragment.querySelector(".panel-beat-badge");
     const nextCountEl = fragment.querySelector(".panel-next-count");
     const viewButtons = fragment.querySelectorAll(".media-view-button");
     const mediaPanels = fragment.querySelectorAll(".media-panel");
@@ -440,6 +456,20 @@
     titleEl.textContent = panel.sceneTitle || `컷 ${index + 1}`;
     durationEl.textContent = panel.durationLabel || "";
     durationEl.hidden = !panel.durationLabel;
+    if (beatBadgeEl) {
+      const beatMeta = BEAT_META[panel.beat];
+      if (beatMeta) {
+        beatBadgeEl.textContent = beatMeta.label;
+        beatBadgeEl.dataset.beat = panel.beat;
+        beatBadgeEl.style.background = beatMeta.color;
+        beatBadgeEl.hidden = false;
+      } else {
+        beatBadgeEl.textContent = "";
+        beatBadgeEl.dataset.beat = "";
+        beatBadgeEl.style.background = "";
+        beatBadgeEl.hidden = true;
+      }
+    }
     nextCountEl.textContent = String(panel.nextPanelIds.length);
     t2iInput.value = panel.t2iPrompt;
     i2vStartInput.value = panel.i2vStartPrompt;
@@ -671,6 +701,7 @@
     renderAiReferenceImages();
     renderAiOutputs();
     renderSelectionDetail();
+    renderBeatCoverage();
   };
 
   updateCanvasMetrics = function overrideUpdateCanvasMetrics() {
@@ -2735,6 +2766,47 @@
     return { min: 15, max: 30 };
   }
 
+  function renderBeatCoverage() {
+    if (!beatCoverageOutputEl) {
+      return;
+    }
+
+    const counts = Object.fromEntries(PANEL_BEATS.map((beat) => [beat, 0]));
+    let unassigned = 0;
+    panels.forEach((panel) => {
+      if (counts[panel.beat] !== undefined) {
+        counts[panel.beat] += 1;
+      } else {
+        unassigned += 1;
+      }
+    });
+
+    const chips = PANEL_BEATS.map((beat) => {
+      const present = counts[beat] > 0;
+      const meta = BEAT_META[beat];
+      return `<span class="beat-coverage-chip" data-present="${present}" style="background:${meta.color}">`
+        + `${escapeHtml(meta.label)}<span class="beat-coverage-count">${counts[beat]}</span></span>`;
+    }).join("");
+
+    const missing = PANEL_BEATS.filter((beat) => counts[beat] === 0);
+    const problems = [];
+    if (missing.length > 0) {
+      problems.push(`빠진 비트: ${missing.map((beat) => BEAT_META[beat].label).join(", ")}`);
+    }
+    if (counts.cta !== 1) {
+      problems.push(`CTA는 정확히 1개여야 합니다 (현재 ${counts.cta}개)`);
+    }
+    if (unassigned > 0) {
+      problems.push(`미지정 컷 ${unassigned}개`);
+    }
+
+    const status = problems.length === 0
+      ? `<p class="beat-coverage-status beat-coverage-status--ok">계약 충족 · 6비트가 모두 채워졌습니다</p>`
+      : `<ul class="beat-coverage-status beat-coverage-status--warn">${problems.map((problem) => `<li>${escapeHtml(problem)}</li>`).join("")}</ul>`;
+
+    beatCoverageOutputEl.innerHTML = `<div class="beat-coverage-chips">${chips}</div>${status}`;
+  }
+
   function renderSelectionDetail() {
     selectionDetailOutputEl.innerHTML = "";
     const selectedPanels = panels.filter((panel) => selectedPanelIds.has(panel.id));
@@ -2762,6 +2834,26 @@
       ].join(" · "))}</p>
     `;
     selectionDetailOutputEl.appendChild(detail);
+
+    const beatField = document.createElement("label");
+    beatField.className = "beat-select-field";
+    const beatOptions = [`<option value="">미지정</option>`]
+      .concat(PANEL_BEATS.map((beat) =>
+        `<option value="${beat}"${panel.beat === beat ? " selected" : ""}>${escapeHtml(BEAT_META[beat].label)}</option>`
+      ))
+      .join("");
+    beatField.innerHTML = `<span>비트</span><select class="beat-select sidebar-input">${beatOptions}</select>`;
+    selectionDetailOutputEl.appendChild(beatField);
+
+    const beatSelect = beatField.querySelector(".beat-select");
+    beatSelect.addEventListener("change", (event) => {
+      const nextBeat = PANEL_BEATS.includes(event.target.value) ? event.target.value : "";
+      pushHistoryState();
+      // Full rerender (like the view-mode buttons) so the card badge updates
+      // immediately; a <select> change is a completed discrete action, so the
+      // sidebar rebuild does not disrupt typing the way a text input would.
+      updatePanel(panel.id, { beat: nextBeat }, { announce: false });
+    });
   }
 
   function getGeneratingStages() {

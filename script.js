@@ -820,7 +820,16 @@ function loadPanels() {
 function normalizePanel(panel, index) {
   const fallback = getDefaultPosition(index);
 
+  // Preserve fields this base normalizer does not know about (sceneTitle,
+  // beat, prompts, reference ids, …). loadPanels() runs at script load time —
+  // before shotboard-ai.js installs its richer normalizePanel override — so
+  // dropping unknown fields here would permanently strip AI-generated data on
+  // reload. The override re-validates every field afterwards, so passing them
+  // through is safe.
+  const source = panel && typeof panel === "object" ? panel : {};
+
   return {
+    ...source,
     id: typeof panel.id === "string" ? panel.id : createId(),
     caption: typeof panel.caption === "string" ? panel.caption : "",
     image: typeof panel.image === "string" ? panel.image : "",
