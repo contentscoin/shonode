@@ -4081,3 +4081,108 @@ body.is-list-mode .story-card:not(.is-compact) {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
 }
+
+/* Six-beat badge on panel cards */
+.panel-beat-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+
+.panel-beat-badge[hidden] {
+  display: none;
+}
+
+/* Six-beat coverage panel (sidebar) */
+.beat-coverage-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.sidebar-card-header--sub h3 {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+
+.beat-coverage-output {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.beat-coverage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.beat-coverage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.beat-coverage-chip[data-present="false"] {
+  opacity: 0.3;
+}
+
+.beat-coverage-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.32);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.beat-coverage-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.beat-coverage-status--ok {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+ul.beat-coverage-status--warn {
+  padding-left: 16px;
+  color: #b45309;
+}
+
+ul.beat-coverage-status--warn li {
+  margin: 2px 0;
+}
+
+/* Beat reassign control in the selection detail */
+.beat-select-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: #334155;
+}
+
+.beat-select-field select {
+  flex: 1;
+}
