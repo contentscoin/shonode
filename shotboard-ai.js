@@ -2714,6 +2714,7 @@
         return {
           sceneTitle: typeof cut.sceneTitle === "string" ? cut.sceneTitle : `${index + 1}. 컷`,
           durationLabel: typeof cut.durationLabel === "string" ? cut.durationLabel : "",
+          beat: PANEL_BEATS.includes(cut.beat) ? cut.beat : "",
           caption: withDurationInCaption(
             typeof cut.caption === "string" ? cut.caption : "",
             typeof cut.durationLabel === "string" ? cut.durationLabel : ""
@@ -2780,6 +2781,7 @@
         i2vCollapsed: true,
         sceneTitle: cut.sceneTitle,
         durationLabel: cut.durationLabel,
+        beat: cut.beat,
         caption: cut.caption,
         referenceImageIds: referenceAssignment.map((item) => item.id),
         referenceImageNames: referenceAssignment.map((item) => item.name),
@@ -2829,6 +2831,7 @@
       : "premium, elegant, cinematic";
     const secondsPerCut = Math.max(2, (average / cutCount).toFixed(1));
     const names = ["브랜드 훅", "루트 샷", "주인공 등장", "디테일 강조", "브랜드 아이콘", "엔드 프레임", "보조 컷", "보조 무드"];
+    const beats = ["hook", "tension", "reveal", "proof", "joy", "cta", "", ""];
     const referenceCount = Number(payload?.referenceImageCount) || 0;
 
     return {
@@ -2842,6 +2845,7 @@
         return {
           sceneTitle: `${index + 1}. ${names[index] || `컷 ${index + 1}`}`,
           durationLabel: `약 ${secondsPerCut}초`,
+          beat: cutCount === 5 && index === 4 ? "cta" : beats[index] || "",
           caption: `약 ${secondsPerCut}초 분량. ${names[index] || `컷 ${index + 1}`}에서 ${subject}의 무드와 브랜드 톤을 또렷하게 보여줍니다.`,
           referenceImageIndexes,
           referenceImageIndex: referenceImageIndexes[0] ?? -1,

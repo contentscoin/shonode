@@ -38,7 +38,7 @@ const shonodeAiClient = {
       // storage unavailable -> defaults
     }
     return {
-      provider: provider === "openai-byok" ? "openai-byok" : "gemini-server",
+      provider: ["openai-byok", "codex-oauth"].includes(provider) ? provider : "gemini-server",
       openaiKey: openaiKey.trim(),
       openaiModel: openaiModel.trim() || this.openaiModel
     };
@@ -60,6 +60,10 @@ const shonodeAiClient = {
     }
   },
 
+  get codexEndpoint() {
+    return `${this.baseOrigin}/api/storyboard-codex`;
+  },
+
   async generateStoryboard(payload) {
     const settings = this.getProviderSettings();
     if (settings.provider === "openai-byok") {
@@ -67,6 +71,9 @@ const shonodeAiClient = {
         throw new Error("OpenAI API 키가 설정되지 않았습니다. 왼쪽 AI 패널에서 키를 입력해주세요.");
       }
       return this.generateStoryboardOpenAI(payload, settings);
+    }
+    if (settings.provider === "codex-oauth") {
+      return this.generateStoryboardCodex(payload);
     }
 
     const response = await fetch(this.endpoint, {
@@ -111,6 +118,68 @@ const shonodeAiClient = {
 
     const result = await response.json();
     return this.mapOpenAIResponse(result);
+  },
+
+  async generateStoryboardCodex(payload) {
+    const prompt = [
+      this.buildPrompt(payload),
+      "",
+      "Output contract: respond with ONLY one JSON object (no markdown, no commentary) matching this JSON Schema:",
+      JSON.stringify(this.buildPlanJsonSchema())
+    ].join("\n");
+
+    const images = (payload?.referenceImages || [])
+      .map((image) => (typeof image?.dataUrl === "string" && /^data:image\//i.test(image.dataUrl) ? image.dataUrl : null))
+      .filter(Boolean);
+
+    const response = await fetch(this.codexEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.headers
+      },
+      body: JSON.stringify({ prompt, images })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Shonode Codex proxy failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+    const content = typeof result?.content === "string" ? result.content.trim() : "";
+    if (!content) {
+      throw new Error("Codex returned no content.");
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(this.extractJsonBlock(content));
+    } catch (error) {
+      throw new Error(`Codex JSON parse failed: ${error.message}`);
+    }
+
+    return this.mapParsedPlan(parsed);
+  },
+
+  extractJsonBlock(text) {
+    const trimmed = text.trim();
+    if (trimmed.startsWith("{")) {
+      return trimmed;
+    }
+
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced?.[1]?.trim().startsWith("{")) {
+      return fenced[1].trim();
+    }
+
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      return trimmed.slice(start, end + 1);
+    }
+
+    return trimmed;
   },
 
   buildOpenAIRequest(payload) {
@@ -203,6 +272,10 @@ const shonodeAiClient = {
               sceneTitle: { type: "string" },
               durationLabel: { type: "string" },
               caption: { type: "string" },
+              beat: {
+                type: "string",
+                enum: ["hook", "tension", "reveal", "proof", "joy", "cta"]
+              },
               referenceImageIndex: { type: "integer" },
               referenceImageIndexes: {
                 type: "array",
@@ -260,6 +333,19 @@ const shonodeAiClient = {
     return referenceImageIndexes.length > 0 || (typeof cut?.i2iPrompt === "string" && cut.i2iPrompt.trim())
       ? "i2i"
       : "t2i";
+  },
+
+  buildPackSection() {
+    const pack = typeof window !== "undefined" ? window.ShonodeAdPack : null;
+    if (!pack?.buildPromptSection) {
+      return "";
+    }
+
+    try {
+      return pack.buildPromptSection();
+    } catch {
+      return "";
+    }
   },
 
   buildReferenceCatalog(referenceImages) {
@@ -368,6 +454,8 @@ const shonodeAiClient = {
       "You are an AI storyboard planner for short commercial videos.",
       "Read the user's vague Korean brief and convert it into a practical storyboard plan.",
       "Return only valid JSON matching the provided schema.",
+      "",
+      this.buildPackSection(),
       "",
       "Requirements:",
       "- Infer an appropriate number of cuts for a 15-30 second commercial unless the brief explicitly requests something else.",
