@@ -220,4 +220,88 @@ function setCorsHeaders(response, allowOrigin) {
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-module.exports = { handleCodexStoryboardProxy };
+const STATUS_TIMEOUT_MS = 10_000;
+
+/**
+ * GET /api/codex-status — reports whether the Codex (ChatGPT OAuth) provider
+ * can run here: hosted environment? CLI installed? logged in with ChatGPT?
+ * Runs `codex --version` and `codex login status`; never returns secrets.
+ */
+async function handleCodexStatusRequest(request, response) {
+  if (request.method !== "GET") {
+    sendJson(response, 405, { error: "Method not allowed." });
+    return;
+  }
+
+  if (process.env.VERCEL) {
+    sendJson(response, 200, {
+      available: false,
+      loggedIn: false,
+      reason: "hosted",
+      detail: "호스팅 환경에는 Codex CLI와 ChatGPT 로그인 세션이 없습니다."
+    });
+    return;
+  }
+
+  const versionResult = await runCodexCommand(["--version"]);
+  if (versionResult.failed) {
+    sendJson(response, 200, {
+      available: false,
+      loggedIn: false,
+      reason: "not_installed",
+      detail: versionResult.output.slice(0, 300)
+    });
+    return;
+  }
+
+  const loginResult = await runCodexCommand(["login", "status"]);
+  sendJson(response, 200, {
+    available: true,
+    loggedIn: !loginResult.failed,
+    reason: loginResult.failed ? "not_logged_in" : "logged_in",
+    version: versionResult.output.split("\n")[0].trim().slice(0, 120),
+    detail: loginResult.output.trim().split("\n").slice(-1)[0]?.slice(0, 300) || ""
+  });
+}
+
+function runCodexCommand(args) {
+  const binary = process.env.CODEX_BIN || "codex";
+
+  return new Promise((resolve) => {
+    let output = "";
+    let settled = false;
+
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        child.kill("SIGKILL");
+        resolve({ failed: true, output: "timed out" });
+      }
+    }, STATUS_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk.toString("utf8");
+    });
+    child.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve({ failed: true, output: error.message || "spawn failed" });
+      }
+    });
+    child.on("close", (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve({ failed: code !== 0, output });
+      }
+    });
+  });
+}
+
+module.exports = { handleCodexStoryboardProxy, handleCodexStatusRequest };

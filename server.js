@@ -5,7 +5,7 @@ const path = require("node:path");
 const { handleStoryboardProxy, sendJson } = require("./storyboard-proxy");
 const { handleConfigRequest } = require("./config-endpoint");
 const { handleOpenAIStoryboardProxy } = require("./openai-proxy");
-const { handleCodexStoryboardProxy } = require("./codex-proxy");
+const { handleCodexStoryboardProxy, handleCodexStatusRequest } = require("./codex-proxy");
 
 const ROOT_DIR = __dirname;
 
@@ -55,6 +55,11 @@ const requestHandler = async (request, response) => {
 
     if (requestUrl.pathname === "/api/storyboard-codex") {
       await handleCodexStoryboardProxy(request, response);
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/codex-status") {
+      await handleCodexStatusRequest(request, response);
       return;
     }
 
