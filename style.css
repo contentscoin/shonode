@@ -4018,3 +4018,66 @@ body.is-list-mode .story-card:not(.is-compact) {
   color: #64748b;
   padding: 8px 2px;
 }
+
+/* AI provider status card */
+.ai-provider-status {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  background: #f8fafc;
+}
+
+.ai-provider-status[data-state="ok"] {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.ai-provider-status[data-state="warn"] {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.ai-provider-status[data-state="error"] {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.ai-provider-status-text {
+  margin: 0;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.ai-provider-status[data-state="ok"] .ai-provider-status-text::before {
+  content: "✅ ";
+}
+
+.ai-provider-status[data-state="warn"] .ai-provider-status-text::before {
+  content: "⚠️ ";
+}
+
+.ai-provider-status[data-state="error"] .ai-provider-status-text::before {
+  content: "⛔ ";
+}
+
+.ai-provider-status[data-state="checking"] .ai-provider-status-text::before {
+  content: "⏳ ";
+}
+
+.ai-provider-status-detail {
+  margin: 0;
+  color: #475569;
+  word-break: keep-all;
+}
+
+.ai-provider-status-refresh {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}

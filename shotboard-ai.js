@@ -22,6 +22,10 @@
   const aiBriefInputEl = document.getElementById("aiBriefInput");
   const aiModelInputEl = document.getElementById("aiModelInput");
   const aiProviderSelectEl = document.getElementById("aiProviderSelect");
+  const aiProviderStatusEl = document.getElementById("aiProviderStatus");
+  const aiProviderStatusTextEl = document.getElementById("aiProviderStatusText");
+  const aiProviderStatusDetailEl = document.getElementById("aiProviderStatusDetail");
+  const aiProviderStatusRefreshEl = document.getElementById("aiProviderStatusRefresh");
   const openaiKeyFieldEl = document.getElementById("openaiKeyField");
   const openaiKeyInputEl = document.getElementById("openaiKeyInput");
   const openaiModelFieldEl = document.getElementById("openaiModelField");
@@ -693,6 +697,11 @@
   window.addEventListener("keydown", handleLinkKeyDown);
   initializeSidebarRails();
   initializeReferenceImages();
+
+  let serverConfigCache = null;
+  let codexStatusCache = null;
+  let providerStatusToken = 0;
+
   initializeAiProviderControls();
 
   function initializeAiProviderControls() {
@@ -710,16 +719,22 @@
       openaiModelInputEl.value = settings.openaiModel;
     }
     syncAiProviderVisibility(settings.provider);
+    renderAiProviderStatus(settings.provider);
 
     aiProviderSelectEl.addEventListener("change", () => {
       aiClient.setProviderSettings({ provider: aiProviderSelectEl.value });
       syncAiProviderVisibility(aiProviderSelectEl.value);
+      renderAiProviderStatus(aiProviderSelectEl.value);
     });
     openaiKeyInputEl?.addEventListener("change", () => {
       aiClient.setProviderSettings({ openaiKey: openaiKeyInputEl.value.trim() });
+      renderAiProviderStatus(aiProviderSelectEl.value);
     });
     openaiModelInputEl?.addEventListener("change", () => {
       aiClient.setProviderSettings({ openaiModel: openaiModelInputEl.value.trim() });
+    });
+    aiProviderStatusRefreshEl?.addEventListener("click", () => {
+      renderAiProviderStatus(aiProviderSelectEl.value, { force: true });
     });
   }
 
@@ -730,6 +745,106 @@
     }
     if (openaiModelFieldEl) {
       openaiModelFieldEl.hidden = !isOpenAI;
+    }
+  }
+
+  function setProviderStatus(state, text, detail = "", showRefresh = false) {
+    if (!aiProviderStatusEl) {
+      return;
+    }
+    aiProviderStatusEl.hidden = false;
+    aiProviderStatusEl.dataset.state = state;
+    aiProviderStatusTextEl.textContent = text;
+    aiProviderStatusDetailEl.textContent = detail;
+    aiProviderStatusDetailEl.hidden = !detail;
+    aiProviderStatusRefreshEl.hidden = !showRefresh;
+  }
+
+  async function renderAiProviderStatus(provider, { force = false } = {}) {
+    if (!aiProviderStatusEl) {
+      return;
+    }
+    const token = ++providerStatusToken;
+
+    if (provider === "openai-byok") {
+      const aiClient = window.ShonodeAI || window.ShotBoardAI;
+      const hasKey = Boolean(aiClient?.getProviderSettings()?.openaiKey);
+      setProviderStatus(
+        hasKey ? "ok" : "warn",
+        hasKey ? "OpenAI 키 설정됨 — 바로 생성할 수 있습니다." : "OpenAI API 키를 입력해주세요.",
+        "키는 이 브라우저에만 저장되며 서버에 보관·로깅되지 않습니다."
+      );
+      return;
+    }
+
+    if (provider === "gemini-server") {
+      setProviderStatus("checking", "서버 설정 확인 중…");
+      try {
+        if (!serverConfigCache || force) {
+          const response = await fetch("/api/config", { headers: { Accept: "application/json" } });
+          serverConfigCache = response.ok ? await response.json() : {};
+        }
+      } catch {
+        serverConfigCache = {};
+      }
+      if (token !== providerStatusToken) {
+        return;
+      }
+      const configured = Boolean(serverConfigCache?.geminiConfigured);
+      setProviderStatus(
+        configured ? "ok" : "warn",
+        configured
+          ? "서버 Gemini 키 설정됨 — 바로 생성할 수 있습니다."
+          : "서버에 Gemini 키가 없습니다 — 생성 시 오프라인 초안으로 대체됩니다.",
+        configured ? "" : "운영자가 GEMINI_API_KEY를 설정하거나, 다른 제공자를 선택하세요."
+      );
+      return;
+    }
+
+    if (provider === "codex-oauth") {
+      setProviderStatus("checking", "Codex(ChatGPT 로그인) 상태 확인 중…");
+      try {
+        if (!codexStatusCache || force) {
+          const response = await fetch("/api/codex-status", { headers: { Accept: "application/json" } });
+          codexStatusCache = response.ok ? await response.json() : { available: false, reason: "unreachable" };
+        }
+      } catch {
+        codexStatusCache = { available: false, reason: "unreachable" };
+      }
+      if (token !== providerStatusToken) {
+        return;
+      }
+
+      const status = codexStatusCache;
+      if (status.reason === "hosted") {
+        setProviderStatus(
+          "error",
+          "호스팅 환경에서는 사용할 수 없습니다 — 로컬 실행 전용입니다.",
+          "내 PC에서 `npm run dev`로 Shonode를 실행한 뒤 이 제공자를 선택하세요.",
+          true
+        );
+      } else if (status.reason === "not_installed" || status.reason === "unreachable") {
+        setProviderStatus(
+          "error",
+          "Codex CLI를 찾을 수 없습니다.",
+          "터미널에서 `npm install -g @openai/codex` 설치 후 `codex login`을 실행하고 '다시 확인'을 누르세요.",
+          true
+        );
+      } else if (!status.loggedIn) {
+        setProviderStatus(
+          "warn",
+          `Codex CLI 감지됨${status.version ? ` (${status.version})` : ""} — ChatGPT 로그인이 필요합니다.`,
+          "터미널에서 `codex login`을 실행해 ChatGPT 계정으로 로그인한 뒤 '다시 확인'을 누르세요.",
+          true
+        );
+      } else {
+        setProviderStatus(
+          "ok",
+          `ChatGPT 계정으로 로그인되어 있습니다${status.version ? ` (${status.version})` : ""} — API 키 없이 바로 생성할 수 있습니다.`,
+          status.detail || "",
+          true
+        );
+      }
     }
   }
 

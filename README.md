@@ -64,12 +64,21 @@ npm run check      # 전체 JS 문법 검사
 | **OpenAI GPT (내 API 키)** | 사용자가 자기 `sk-...` 키 입력 | 로컬 + 호스팅 | 키는 **사용자 브라우저(localStorage)에만 저장**되고 요청 헤더로 `/api/storyboard-openai`에 전달 — 서버는 보관·로깅 없이 OpenAI로 1회 전달만 합니다. 기본 모델 `gpt-4o-mini`(변경 가능), `OPENAI_BASE_URL`로 호환 업스트림 교체 가능 |
 | **Codex (ChatGPT 로그인)** | `codex login` (API 키 불필요) | **로컬 전용** | 로컬에 설치된 [Codex CLI](https://github.com/openai/codex)를 서버가 `codex exec`로 호출해 ChatGPT 계정 인증을 그대로 사용. 호스팅 배포에서는 501 안내 응답. `CODEX_BIN`, `CODEX_EXTRA_ARGS`, `CODEX_TIMEOUT_MS`로 튜닝 |
 
+제공자를 선택하면 선택란 바로 아래 **상태 카드**가 지금 생성 가능한지 알려줍니다:
+
+- Gemini: 서버 키 설정 여부 (미설정이면 오프라인 초안 폴백 안내)
+- OpenAI: 키 입력 여부 + "키는 이 브라우저에만 저장" 안내
+- Codex: ✅ ChatGPT 로그인됨 / ⚠️ CLI는 있으나 `codex login` 필요 / ⛔ CLI 미설치 / ⛔ 호스팅 환경(로컬 전용) — "다시 확인" 버튼으로 재점검 (`GET /api/codex-status`)
+
 Codex 사용법:
 
 ```bash
-codex login    # ChatGPT 계정 로그인 (최초 1회)
-npm run dev    # Shonode 로컬 실행 후 AI 제공자에서 Codex 선택
+npm install -g @openai/codex   # Codex CLI 설치 (최초 1회)
+codex login                    # ChatGPT 계정 로그인 (최초 1회)
+npm run dev                    # Shonode 로컬 실행 후 AI 제공자에서 Codex 선택
 ```
+
+상태 카드가 "✅ ChatGPT 계정으로 로그인되어 있습니다"로 바뀌면 준비 완료입니다.
 
 제공자 레이어는 추후 OpenAI "Sign in with ChatGPT"(호스팅 앱용 OAuth, 개발자 프로그램 승인 필요) 같은 토큰 기반 제공자를 요청 플로우 재작업 없이 끼울 수 있도록 설계돼 있습니다.
 

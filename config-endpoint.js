@@ -29,13 +29,14 @@ function handleConfigRequest(request, response) {
 
   const supabaseUrl = (process.env.SUPABASE_URL || fileConfig?.supabaseUrl || "").trim();
   const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || fileConfig?.supabaseAnonKey || "").trim();
+  const geminiConfigured = Boolean((process.env.GEMINI_API_KEY || "").trim());
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    sendJson(response, 200, {});
+    sendJson(response, 200, { geminiConfigured });
     return;
   }
 
-  sendJson(response, 200, { supabaseUrl, supabaseAnonKey });
+  sendJson(response, 200, { supabaseUrl, supabaseAnonKey, geminiConfigured });
 }
 
 module.exports = { handleConfigRequest };
