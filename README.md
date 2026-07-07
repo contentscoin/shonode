@@ -119,8 +119,13 @@ Storyboard generation supports two providers, selected in the AI panel:
 
 - **Gemini (server key, default)** — the operator sets `GEMINI_API_KEY`; requests go through `/api/storyboard`.
 - **OpenAI GPT (bring your own key)** — each user pastes their own OpenAI API key in the AI panel. The key is stored only in that user's browser (`localStorage`), sent per request as a header to `/api/storyboard-openai`, forwarded once to OpenAI, and never persisted or logged server-side. Default model `gpt-4o-mini` (editable). `OPENAI_BASE_URL` can point the proxy at a compatible upstream for testing.
+- **Codex (ChatGPT OAuth, local only)** — uses the locally installed [Codex CLI](https://github.com/openai/codex) signed in with your ChatGPT account (`codex login`), so no API key is needed. Only works when running Shonode locally (`npm run dev`); the hosted deployment answers 501 for this provider. `CODEX_BIN`, `CODEX_EXTRA_ARGS`, and `CODEX_TIMEOUT_MS` tune the CLI invocation.
 
-The provider layer is designed so an OAuth-token provider (e.g. OpenAI's "Sign in with ChatGPT", which requires developer-program approval) can be added later without reworking the request flow.
+The provider layer is designed so an OAuth-token provider (e.g. OpenAI's "Sign in with ChatGPT" for hosted apps, which requires developer-program approval) can be added later without reworking the request flow.
+
+## Ad Storyboard Skill pack
+
+`packs/ad-storyboard-skill.js` embeds a creative playbook distilled from the OpenCrab **Ad Storyboard Skill Workflow**: the six-beat advertising contract (hook → tension → reveal → proof → joy → cta), claim-safety QC gate rules, and prompt negative constraints (no copying of reference assets, one CTA, reference distance). Every provider's generation prompt includes this playbook, and each generated cut carries a `beat` label that is stored on the panel (`shonode-workspace-v2`).
 
 ## Cloud mode (optional, Supabase)
 
