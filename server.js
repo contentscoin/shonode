@@ -4,6 +4,7 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { handleStoryboardProxy, sendJson } = require("./storyboard-proxy");
 const { handleConfigRequest } = require("./config-endpoint");
+const { handleOpenAIStoryboardProxy } = require("./openai-proxy");
 
 const ROOT_DIR = __dirname;
 
@@ -43,6 +44,11 @@ const requestHandler = async (request, response) => {
 
     if (requestUrl.pathname === "/api/config") {
       handleConfigRequest(request, response);
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/storyboard-openai") {
+      await handleOpenAIStoryboardProxy(request, response);
       return;
     }
 

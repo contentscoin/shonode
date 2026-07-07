@@ -6,6 +6,7 @@
   ],
   "routes": [
     { "src": "/api/storyboard", "dest": "/api/storyboard.js" },
+    { "src": "/api/storyboard-openai", "dest": "/api/storyboard-openai.js" },
     { "src": "/api/config", "dest": "/api/config.js" },
     { "handle": "filesystem" },
     { "src": "/", "dest": "/index.html" }
