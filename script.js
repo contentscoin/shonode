@@ -980,7 +980,8 @@ function loadViewState() {
     return {
       zoom: Number.isFinite(parsed.zoom) ? parsed.zoom : 1,
       scrollLeft: Number.isFinite(parsed.scrollLeft) ? parsed.scrollLeft : 0,
-      scrollTop: Number.isFinite(parsed.scrollTop) ? parsed.scrollTop : 0
+      scrollTop: Number.isFinite(parsed.scrollTop) ? parsed.scrollTop : 0,
+      beatLaneMode: parsed.beatLaneMode === true
     };
   } catch {
     return {};
@@ -988,12 +989,16 @@ function loadViewState() {
 }
 
 function persistViewState() {
+  // In beat-lane mode the viewport scroll tracks the lanes, not the canvas, so
+  // keep the previously stored canvas scroll instead of clobbering it.
+  const prev = isBeatLaneMode ? loadViewState() : null;
   window.localStorage.setItem(
     VIEW_STORAGE_KEY,
     JSON.stringify({
       zoom,
-      scrollLeft: canvasViewport.scrollLeft,
-      scrollTop: canvasViewport.scrollTop
+      scrollLeft: prev ? (prev.scrollLeft ?? 0) : canvasViewport.scrollLeft,
+      scrollTop: prev ? (prev.scrollTop ?? 0) : canvasViewport.scrollTop,
+      beatLaneMode: isBeatLaneMode
     })
   );
 }
@@ -2625,8 +2630,9 @@ function disableListMode() {
 
 // ── Beat Lane Mode ────────────────────────────────────────────────────────────
 // A third, mutually-exclusive board layout (canvas / list / beat-lane) that
-// arranges cards into six-beat swimlanes. Purely visual and ephemeral, like list
-// mode — it never mutates panel positions or history.
+// arranges cards into six-beat swimlanes. Purely visual — it never mutates panel
+// positions or history — but the toggle IS persisted in view state so it survives
+// reloads and workspace snapshots.
 
 function syncBeatLaneButton() {
   if (!beatLaneButton) return;
@@ -2638,6 +2644,24 @@ function clearBeatLaneMode() {
   if (!isBeatLaneMode) return;
   isBeatLaneMode = false;
   document.body.classList.remove("is-beat-lane-mode");
+  syncBeatLaneButton();
+}
+
+// Set the beat-lane flag + body class WITHOUT rendering, so a following
+// renderPanels() paints the right layout in one pass. Used to restore a persisted
+// mode on load / workspace switch. Mobile forces list mode, so never enable there.
+function primeBeatLaneMode(shouldEnable) {
+  const enable = shouldEnable === true && !MOBILE_HOME_MEDIA_QUERY.matches;
+  if (enable && isListMode) {
+    isListMode = false;
+    document.body.classList.remove("is-list-mode");
+    if (listViewButton) {
+      listViewButton.setAttribute("aria-pressed", "false");
+      listViewButton.querySelector(".view-toggle-label").textContent = "리스트";
+    }
+  }
+  isBeatLaneMode = enable;
+  document.body.classList.toggle("is-beat-lane-mode", enable);
   syncBeatLaneButton();
 }
 
@@ -2656,6 +2680,7 @@ function enableBeatLaneMode(animate = true) {
   document.body.classList.add("is-beat-lane-mode");
   syncBeatLaneButton();
   renderPanels();
+  persistViewState();
   if (animate) setStatus("비트 레인 뷰로 전환했습니다.");
 }
 
@@ -2664,6 +2689,7 @@ function disableBeatLaneMode(animate = true) {
   document.body.classList.remove("is-beat-lane-mode");
   syncBeatLaneButton();
   renderPanels();
+  persistViewState();
   if (animate) setStatus("캔버스 뷰로 전환했습니다.");
 }
 

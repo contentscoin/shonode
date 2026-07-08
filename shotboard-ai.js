@@ -962,6 +962,10 @@
   renderProjectSidebar();
   applySidebarRailState(false);
   syncConnectionLayer();
+  // Restore a persisted beat-lane view (from the last session) before rendering.
+  if (typeof primeBeatLaneMode === "function") {
+    primeBeatLaneMode(typeof savedView !== "undefined" && savedView?.beatLaneMode === true);
+  }
   renderPanels({ restoreView: true });
   initializeWorkspaceLibrary();
 
@@ -1167,7 +1171,8 @@
       view: {
         zoom: 1,
         scrollLeft: 0,
-        scrollTop: 0
+        scrollTop: 0,
+        beatLaneMode: false
       },
       sidebar: {
         leftSections: ["project"],
@@ -3618,7 +3623,8 @@
       view: {
         zoom,
         scrollLeft: canvasViewport.scrollLeft,
-        scrollTop: canvasViewport.scrollTop
+        scrollTop: canvasViewport.scrollTop,
+        beatLaneMode: isBeatLaneMode === true
       },
       sidebar: {
         leftSections: [...activeLeftSidebarSections],
@@ -3749,6 +3755,9 @@
     renderProjectSidebar();
     applySidebarRailState(false);
     updateHistoryUI();
+    if (typeof primeBeatLaneMode === "function") {
+      primeBeatLaneMode(viewSnapshot.beatLaneMode === true);
+    }
     renderPanels({ restoreView: true });
     window.setTimeout(() => {
       persistViewState();
