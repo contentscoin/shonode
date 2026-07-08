@@ -84,6 +84,7 @@ const timelineZoomInBtn = document.getElementById("timelineZoomIn");
 const timelineZoomOutBtn = document.getElementById("timelineZoomOut");
 const timelinePlayButton = document.getElementById("timelinePlayButton");
 const listViewButton = document.getElementById("listViewButton");
+const beatLaneButton = document.getElementById("beatLaneButton");
 const mobileMenuButton = document.getElementById("mobileMenuButton");
 const mobileDrawer = document.getElementById("mobileDrawer");
 const mobileDrawerSaveLabel = document.getElementById("mobileDrawerSaveLabel");
@@ -145,6 +146,7 @@ let isPlaying = false;
 let playheadRafId = null;
 let lastPlayTimestamp = null;
 let isListMode = false;
+let isBeatLaneMode = false;
 let isDrawerOpen = false;
 let expandedPanelIds = new Set();
 
@@ -178,6 +180,10 @@ if (MOBILE_HOME_MEDIA_QUERY.matches) {
 
 listViewButton?.addEventListener("click", () => {
   if (isListMode) disableListMode(); else enableListMode();
+});
+
+beatLaneButton?.addEventListener("click", () => {
+  if (isBeatLaneMode) disableBeatLaneMode(); else enableBeatLaneMode();
 });
 
 MOBILE_HOME_MEDIA_QUERY.addEventListener("change", (e) => {
@@ -1174,6 +1180,13 @@ function renderPanels(options = {}) {
     panelCount.textContent = String(panels.length);
   }
 
+  if (isBeatLaneMode) {
+    renderBeatLanes();
+    syncSelectionUI();
+    scheduleCanvasMetricsUpdate(Boolean(options.restoreView));
+    return;
+  }
+
   const orderedPanels = isListMode
     ? [...panels].sort((a, b) => a.y - b.y || a.x - b.x)
     : panels;
@@ -1185,6 +1198,76 @@ function renderPanels(options = {}) {
   if (isListMode) applyCompactCards();
   syncSelectionUI();
   scheduleCanvasMetricsUpdate(Boolean(options.restoreView));
+}
+
+// Beat-lane layout: groups every card into one swimlane per six-beat contract
+// step (hook → cta), plus a trailing "미지정" lane for unassigned cuts. Beat
+// order/labels/colors come from window.ShonodeBeatMeta (set by shotboard-ai.js)
+// so there is a single source of truth. Cards keep their beat via panel.beat;
+// their absolute x/y are neutralized by CSS in beat-lane mode, so we do not
+// mutate positions — toggling back to canvas restores the hand-placed layout.
+function renderBeatLanes() {
+  const beatMeta = (typeof window !== "undefined" && window.ShonodeBeatMeta) || { order: [], meta: {} };
+  const order = Array.isArray(beatMeta.order) ? beatMeta.order : [];
+  const meta = beatMeta.meta || {};
+
+  const buckets = new Map();
+  order.forEach((beat) => buckets.set(beat, []));
+  const unassigned = [];
+  panels.forEach((panel) => {
+    if (buckets.has(panel.beat)) {
+      buckets.get(panel.beat).push(panel);
+    } else {
+      unassigned.push(panel);
+    }
+  });
+
+  const lanes = order.map((beat) => ({
+    id: beat,
+    label: meta[beat]?.label ?? beat,
+    color: meta[beat]?.color ?? "#94a3b8",
+    items: buckets.get(beat)
+  }));
+  if (unassigned.length > 0) {
+    lanes.push({ id: "", label: "미지정", color: "#94a3b8", items: unassigned });
+  }
+
+  lanes.forEach((lane) => {
+    const laneEl = document.createElement("div");
+    laneEl.className = "beat-lane";
+    laneEl.dataset.beat = lane.id;
+
+    const header = document.createElement("div");
+    header.className = "beat-lane-header";
+    header.style.setProperty("--lane-color", lane.color);
+
+    const dot = document.createElement("span");
+    dot.className = "beat-lane-dot";
+    const label = document.createElement("span");
+    label.className = "beat-lane-label";
+    label.textContent = lane.label;
+    const count = document.createElement("span");
+    count.className = "beat-lane-count";
+    count.textContent = String(lane.items.length);
+    header.append(dot, label, count);
+
+    const track = document.createElement("div");
+    track.className = "beat-lane-track";
+    if (lane.items.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "beat-lane-empty";
+      empty.textContent = "이 비트의 컷이 아직 없습니다";
+      track.appendChild(empty);
+    } else {
+      lane.items.forEach((panel) => {
+        const index = panels.indexOf(panel);
+        track.appendChild(createPanelElement(panel, index));
+      });
+    }
+
+    laneEl.append(header, track);
+    board.appendChild(laneEl);
+  });
 }
 
 function isConfirmDialogOpen() {
@@ -1574,7 +1657,7 @@ function createPanelElement(panel, index) {
 }
 
 function startCardDrag(event, panelId) {
-  if (isListMode) return;
+  if (isListMode || isBeatLaneMode) return;
   const dragIds =
     selectedPanelIds.size > 1 && selectedPanelIds.has(panelId)
       ? Array.from(selectedPanelIds)
@@ -2305,6 +2388,10 @@ function elevatePanels(panelIds) {
 }
 
 function nudgeSelection(fallbackPanelId, deltaX, deltaY) {
+  // Beat-lane mode lays cards out by CSS; nudging x/y would silently corrupt the
+  // stored canvas positions while nothing moves on screen.
+  if (isBeatLaneMode) return;
+
   const ids =
     selectedPanelIds.size > 0 && selectedPanelIds.has(fallbackPanelId)
       ? Array.from(selectedPanelIds)
@@ -2487,6 +2574,7 @@ function syncDrawerSaveLabel() {
 // ── List Mode ─────────────────────────────────────────────────────────────────
 
 function enableListMode(animate = true) {
+  clearBeatLaneMode();
   isListMode = true;
   document.body.classList.add("is-list-mode");
   if (listViewButton) {
@@ -2511,6 +2599,50 @@ function disableListMode() {
   }
   renderPanels();
   setStatus("캔버스 뷰로 전환했습니다.");
+}
+
+// ── Beat Lane Mode ────────────────────────────────────────────────────────────
+// A third, mutually-exclusive board layout (canvas / list / beat-lane) that
+// arranges cards into six-beat swimlanes. Purely visual and ephemeral, like list
+// mode — it never mutates panel positions or history.
+
+function syncBeatLaneButton() {
+  if (!beatLaneButton) return;
+  beatLaneButton.setAttribute("aria-pressed", isBeatLaneMode ? "true" : "false");
+}
+
+// Reset beat-lane state WITHOUT re-rendering (callers render themselves).
+function clearBeatLaneMode() {
+  if (!isBeatLaneMode) return;
+  isBeatLaneMode = false;
+  document.body.classList.remove("is-beat-lane-mode");
+  syncBeatLaneButton();
+}
+
+function enableBeatLaneMode(animate = true) {
+  // Silently drop list mode (mutually exclusive) — we re-render once below.
+  if (isListMode) {
+    isListMode = false;
+    expandedPanelIds.clear();
+    document.body.classList.remove("is-list-mode");
+    if (listViewButton) {
+      listViewButton.setAttribute("aria-pressed", "false");
+      listViewButton.querySelector(".view-toggle-label").textContent = "리스트";
+    }
+  }
+  isBeatLaneMode = true;
+  document.body.classList.add("is-beat-lane-mode");
+  syncBeatLaneButton();
+  renderPanels();
+  if (animate) setStatus("비트 레인 뷰로 전환했습니다.");
+}
+
+function disableBeatLaneMode(animate = true) {
+  isBeatLaneMode = false;
+  document.body.classList.remove("is-beat-lane-mode");
+  syncBeatLaneButton();
+  renderPanels();
+  if (animate) setStatus("캔버스 뷰로 전환했습니다.");
 }
 
 function applyCompactCards() {

@@ -4186,3 +4186,234 @@ ul.beat-coverage-status--warn li {
 .beat-select-field select {
   flex: 1;
 }
+
+/* ── Beat-lane toolbar toggle ─────────────────────────────────────────────── */
+/* Desktop-only third board view (canvas / list / beat-lane). Hidden on mobile
+   and whenever list mode is active (mobile forces list mode). */
+.canvas-tool-group--beat-lane {
+  display: flex;
+}
+
+body.is-list-mode .canvas-tool-group--beat-lane {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .canvas-tool-group--beat-lane {
+    display: none;
+  }
+}
+
+/* ── is-beat-lane-mode ────────────────────────────────────────────────────── */
+/* Swimlane layout: one lane per six-beat step plus a trailing 미지정 lane.
+   Modeled on is-list-mode — neutralizes absolute card positioning with a body
+   class + CSS, never mutating panel x/y. Toggling back restores the canvas. */
+body.is-beat-lane-mode .canvas-viewport {
+  overflow: auto;
+  padding: 18px 16px 160px;
+}
+
+body.is-beat-lane-mode .board-sizer {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+body.is-beat-lane-mode .board {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  transform: none !important;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: none;
+}
+
+body.is-beat-lane-mode .connection-layer {
+  display: none;
+}
+
+/* Hide zoom controls (not meaningful in lane mode), like list mode does. */
+body.is-beat-lane-mode .canvas-tool-group:has(#zoomInButton) {
+  display: none;
+}
+
+.beat-lane {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-subtle);
+  overflow: hidden;
+}
+
+.beat-lane-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  background: var(--surface-strong);
+  border-bottom: 1px solid var(--border);
+  border-left: 4px solid var(--lane-color, #94a3b8);
+}
+
+.beat-lane-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--lane-color, #94a3b8);
+  flex-shrink: 0;
+}
+
+.beat-lane-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.beat-lane-count {
+  margin-left: auto;
+  min-width: 24px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.beat-lane-track {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px;
+  overflow-x: auto;
+}
+
+.beat-lane-empty {
+  margin: 0;
+  padding: 16px 6px;
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+}
+
+/* Lane cards are a compact overview: only the header (scene title + beat badge)
+   and a short caption survive, so a whole swimlane reads at a glance and several
+   lanes stack on screen. The heavy media/prompt block is hidden. */
+body.is-beat-lane-mode .story-card {
+  position: static !important;
+  flex: 0 0 auto;
+  width: 260px !important;
+  margin: 0 !important;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.07);
+}
+
+body.is-beat-lane-mode .node-port,
+body.is-beat-lane-mode .drag-handle-icon,
+body.is-beat-lane-mode .card-actions,
+body.is-beat-lane-mode .panel-flow-row,
+body.is-beat-lane-mode .media-stage {
+  display: none;
+}
+
+body.is-beat-lane-mode .panel-handle {
+  cursor: default;
+}
+
+body.is-beat-lane-mode .caption-field {
+  margin-top: 8px;
+}
+
+body.is-beat-lane-mode .caption-input {
+  min-height: 0 !important;
+  height: 48px !important;
+  font-size: 0.8rem;
+}
+
+/* ── QC risk badge (qc_gate intake) ──────────────────────────────────────── */
+.sidebar-grid--intake {
+  margin-top: 10px;
+}
+
+.intake-proof-field {
+  justify-content: flex-end;
+}
+
+.intake-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  font-size: 0.86rem;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.intake-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-strong);
+  cursor: pointer;
+}
+
+.qc-risk-badge {
+  --risk-color: #16a34a;
+  --risk-soft: rgba(22, 163, 74, 0.1);
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--risk-color);
+  border-radius: 12px;
+  background: var(--risk-soft);
+}
+
+.qc-risk-badge[data-risk="proof_required"] {
+  --risk-color: #b45309;
+  --risk-soft: rgba(245, 158, 11, 0.12);
+}
+
+.qc-risk-badge[data-risk="high"] {
+  --risk-color: #dc2626;
+  --risk-soft: rgba(220, 38, 38, 0.1);
+}
+
+.qc-risk-badge__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.qc-risk-badge__pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--risk-color);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.qc-risk-badge__tag {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.qc-risk-badge__tag--muted {
+  color: var(--text-subtle);
+  font-weight: 500;
+}
+
+.qc-risk-badge__detail {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-main);
+}

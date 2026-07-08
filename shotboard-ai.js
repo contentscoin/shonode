@@ -26,6 +26,12 @@
     joy: { label: "환희", color: "#22C55E" },
     cta: { label: "전환(CTA)", color: "#EF4444" }
   };
+  // Expose the six-beat metadata (canonical order + Korean label + color) as a
+  // read-only global so the base canvas engine (script.js) can render beat lanes
+  // from the SAME source of truth without duplicating the beat list.
+  if (typeof window !== "undefined") {
+    window.ShonodeBeatMeta = { order: PANEL_BEATS.slice(), meta: BEAT_META };
+  }
   const PATTERN_SOURCE_FAMILIES = ["award", "dolphiners", "hybrid"];
   const CLAIM_RISK_LEVELS = ["low", "proof_required", "high"];
   const CLAIM_RULINGS = ["allowed", "claim_safe_rewrite", "blocked"];
@@ -62,6 +68,9 @@
   const aiSummaryOutputEl = document.getElementById("aiSummaryOutput");
   const aiSequenceOutputEl = document.getElementById("aiSequenceOutput");
   const beatCoverageOutputEl = document.getElementById("beatCoverageOutput");
+  const productCategoryInputEl = document.getElementById("productCategoryInput");
+  const hasProofAssetsInputEl = document.getElementById("hasProofAssetsInput");
+  const qcRiskBadgeEl = document.getElementById("qcRiskBadge");
   const selectionDetailOutputEl = document.getElementById("selectionDetailOutput");
   const generatePlanButtonEl = document.getElementById("generatePlanButton");
   const generatePlanButtonLabelEl = document.getElementById("generatePlanButtonLabel");
@@ -147,6 +156,8 @@
       aiSummary: "",
       previewVideoUrl: "",
       previewPosterUrl: "",
+      productCategory: "",
+      hasProofAssets: false,
       pattern: null,
       claimLog: []
     };
@@ -162,10 +173,26 @@
       aiSummary: typeof candidate?.aiSummary === "string" ? candidate.aiSummary : "",
       previewVideoUrl: typeof candidate?.previewVideoUrl === "string" ? candidate.previewVideoUrl : "",
       previewPosterUrl: typeof candidate?.previewPosterUrl === "string" ? candidate.previewPosterUrl : "",
+      productCategory: sanitizeProductCategory(candidate?.productCategory),
+      hasProofAssets: candidate?.hasProofAssets === true,
       pattern: sanitizeProjectPattern(candidate?.pattern),
       claimLog: sanitizeClaimLog(candidate?.claimLog)
     };
   };
+
+  function sanitizeProductCategory(candidate) {
+    if (typeof candidate !== "string" || !candidate) {
+      return "";
+    }
+    const pack = typeof window !== "undefined" ? window.ShonodeAdPack : null;
+    const categories = Array.isArray(pack?.productRiskCategories) ? pack.productRiskCategories : null;
+    // If the pack (taxonomy) can't be consulted — e.g. its script failed to load —
+    // preserve the stored string by type instead of wiping saved user data.
+    if (!categories) {
+      return candidate;
+    }
+    return categories.some((cat) => cat.id === candidate) ? candidate : "";
+  }
 
   function sanitizeProjectPattern(candidate) {
     if (!candidate || typeof candidate !== "object") {
@@ -210,6 +237,8 @@
       aiSummary: projectValue.aiSummary ?? "",
       previewVideoUrl: projectValue.previewVideoUrl ?? "",
       previewPosterUrl: projectValue.previewPosterUrl ?? "",
+      productCategory: sanitizeProductCategory(projectValue.productCategory),
+      hasProofAssets: projectValue.hasProofAssets === true,
       pattern: projectValue.pattern ? { ...projectValue.pattern } : null,
       claimLog: Array.isArray(projectValue.claimLog) ? projectValue.claimLog.map((entry) => ({ ...entry })) : []
     };
@@ -300,11 +329,18 @@
     if (aiReferenceWeightInputEl) {
       aiReferenceWeightInputEl.value = sanitizeReferenceWeight(project.referenceWeight);
     }
+    if (productCategoryInputEl) {
+      productCategoryInputEl.value = project.productCategory ?? "";
+    }
+    if (hasProofAssetsInputEl) {
+      hasProofAssetsInputEl.checked = project.hasProofAssets === true;
+    }
     renderWorkspaceLibrary();
     renderAiReferenceImages();
     renderAiOutputs();
     renderPreviewSidebar();
     renderBeatCoverage();
+    renderQcRiskBadge();
   };
 
   persistProject = function overridePersistProject(...args) {
@@ -715,6 +751,24 @@
   bindProjectField(aiReferenceWeightInputEl, "referenceWeight");
   bindProjectField(previewVideoUrlInputEl, "previewVideoUrl");
   bindProjectField(previewPosterUrlInputEl, "previewPosterUrl");
+
+  // qc_gate intake wiring: keep the risk badge live as the operator edits the
+  // brief, picks a product category, or toggles proof availability.
+  populateProductCategorySelect();
+  aiBriefInputEl.addEventListener("input", renderQcRiskBadge);
+  // Discrete edits: snapshot first so each is its own undo step. These fields ride
+  // in every history snapshot (cloneProject), so without this an unrelated undo
+  // would silently revert the category / proof selection.
+  productCategoryInputEl?.addEventListener("change", () => {
+    pushHistoryState();
+    updateProject({ productCategory: sanitizeProductCategory(productCategoryInputEl.value) }, { announce: false });
+    renderQcRiskBadge();
+  });
+  hasProofAssetsInputEl?.addEventListener("change", () => {
+    pushHistoryState();
+    updateProject({ hasProofAssets: hasProofAssetsInputEl.checked }, { announce: false });
+    renderQcRiskBadge();
+  });
 
   generatePlanButtonEl.addEventListener("click", handleGeneratePlan);
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
@@ -2595,9 +2649,26 @@
     setStatus("브리프를 분석해 컷 초안을 생성하고 있습니다.");
 
     try {
+      // qc_gate — classify product risk and pass a claim-safe directive to the
+      // provider as a SEPARATE field (never mutate the brief itself, so the local
+      // fallback's brief parsing stays clean).
+      const pack = window.ShonodeAdPack;
+      const qcRisk = pack && typeof pack.classifyProductRisk === "function"
+        ? pack.classifyProductRisk({
+            categoryId: project.productCategory,
+            hasProof: project.hasProofAssets === true,
+            brief
+          })
+        : null;
+      const qcDirective = qcRisk && pack && typeof pack.buildQcDirective === "function"
+        ? pack.buildQcDirective(qcRisk)
+        : "";
+
       const payload = {
         brief,
         project: cloneProject(),
+        qcRisk,
+        qcDirective,
         existingPanelCount: panels.length,
         referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),
         referenceImageCount: aiReferenceImages.length,
@@ -2805,6 +2876,57 @@
       : `<ul class="beat-coverage-status beat-coverage-status--warn">${problems.map((problem) => `<li>${escapeHtml(problem)}</li>`).join("")}</ul>`;
 
     beatCoverageOutputEl.innerHTML = `<div class="beat-coverage-chips">${chips}</div>${status}`;
+  }
+
+  // qc_gate intake — fill the "제품 카테고리" select from the pack taxonomy so the
+  // option ids/labels never drift from the classifier.
+  function populateProductCategorySelect() {
+    if (!productCategoryInputEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    const categories = Array.isArray(pack?.productRiskCategories) ? pack.productRiskCategories : [];
+    const options = [`<option value="">카테고리 선택 (선택)</option>`]
+      .concat(categories.map((cat) =>
+        `<option value="${escapeHtml(cat.id)}">${escapeHtml(cat.label)}</option>`
+      ))
+      .join("");
+    productCategoryInputEl.innerHTML = options;
+  }
+
+  // Runs the client-side qc_gate classifier and paints the risk badge next to the
+  // brief. Cheap enough to call on every brief keystroke and sidebar render.
+  function renderQcRiskBadge() {
+    if (!qcRiskBadgeEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.classifyProductRisk !== "function") {
+      qcRiskBadgeEl.hidden = true;
+      return;
+    }
+
+    const result = pack.classifyProductRisk({
+      categoryId: project.productCategory,
+      hasProof: project.hasProofAssets === true,
+      brief: project.aiBrief || ""
+    });
+
+    qcRiskBadgeEl.hidden = false;
+    qcRiskBadgeEl.dataset.risk = result.level;
+
+    const parts = [];
+    parts.push(`<span class="qc-risk-badge__pill">${escapeHtml(result.headline)}</span>`);
+    if (result.detected && result.categoryLabel) {
+      parts.push(`<span class="qc-risk-badge__tag">브리프에서 감지: ${escapeHtml(result.categoryLabel)}</span>`);
+    }
+    if (result.matchedKeywords.length > 0) {
+      parts.push(`<span class="qc-risk-badge__tag qc-risk-badge__tag--muted">${result.matchedKeywords.map(escapeHtml).join(" · ")}</span>`);
+    }
+
+    qcRiskBadgeEl.innerHTML =
+      `<div class="qc-risk-badge__row">${parts.join("")}</div>`
+      + `<p class="qc-risk-badge__detail">${escapeHtml(result.detail)}</p>`;
   }
 
   function renderSelectionDetail() {
