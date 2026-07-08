@@ -4311,13 +4311,47 @@ body.is-beat-lane-mode .story-card {
 body.is-beat-lane-mode .node-port,
 body.is-beat-lane-mode .drag-handle-icon,
 body.is-beat-lane-mode .card-actions,
-body.is-beat-lane-mode .panel-flow-row,
-body.is-beat-lane-mode .media-stage {
+body.is-beat-lane-mode .panel-flow-row {
   display: none;
 }
 
 body.is-beat-lane-mode .panel-handle {
   cursor: default;
+}
+
+/* Thumbnail: reveal ONLY the image media-panel (as a fixed-height preview) and
+   hide the switcher tabs, prompt panels, vid panel, and upload placeholder.
+   A cut with no image collapses the thumbnail to nothing and stays text-only. */
+body.is-beat-lane-mode .media-stage {
+  display: block;
+  margin: 0;
+  min-height: 0;
+}
+
+body.is-beat-lane-mode .media-switcher,
+body.is-beat-lane-mode .prompt-panel,
+body.is-beat-lane-mode .vid-panel,
+body.is-beat-lane-mode .dropzone-placeholder,
+body.is-beat-lane-mode .image-name {
+  display: none !important;
+}
+
+body.is-beat-lane-mode .media-panel[data-panel-view="image"] {
+  display: block !important;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  pointer-events: none;
+}
+
+body.is-beat-lane-mode .preview-image:not([hidden]) {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 10px;
+  margin-top: 8px;
 }
 
 body.is-beat-lane-mode .caption-field {
