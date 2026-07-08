@@ -770,6 +770,18 @@
     renderQcRiskBadge();
   });
 
+  // Coverage panel ↔ beat lane: clicking a coverage chip jumps into beat-lane
+  // view and focuses that beat's lane.
+  beatCoverageOutputEl?.addEventListener("click", (event) => {
+    const chip = event.target.closest(".beat-coverage-chip");
+    if (!chip || !beatCoverageOutputEl.contains(chip)) {
+      return;
+    }
+    if (typeof focusBeatLane === "function") {
+      focusBeatLane(chip.dataset.beat || "");
+    }
+  });
+
   generatePlanButtonEl.addEventListener("click", handleGeneratePlan);
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
   importWorkspaceInputEl?.addEventListener("change", handleImportWorkspaceInputChange);
@@ -2855,8 +2867,8 @@
     const chips = PANEL_BEATS.map((beat) => {
       const present = counts[beat] > 0;
       const meta = BEAT_META[beat];
-      return `<span class="beat-coverage-chip" data-present="${present}" style="background:${meta.color}">`
-        + `${escapeHtml(meta.label)}<span class="beat-coverage-count">${counts[beat]}</span></span>`;
+      return `<button type="button" class="beat-coverage-chip" data-beat="${beat}" data-present="${present}" style="background:${meta.color}" title="${escapeHtml(meta.label)} 레인으로 이동">`
+        + `${escapeHtml(meta.label)}<span class="beat-coverage-count">${counts[beat]}</span></button>`;
     }).join("");
 
     const missing = PANEL_BEATS.filter((beat) => counts[beat] === 0);

@@ -1237,6 +1237,22 @@ function renderBeatLanes() {
     laneEl.className = "beat-lane";
     laneEl.dataset.beat = lane.id;
 
+    // Contract status, mirroring the beat-coverage panel: a real beat with no
+    // cuts is "missing"; the CTA lane must hold exactly one cut; the trailing
+    // "미지정" lane is flagged as unassigned.
+    let contract = "ok";
+    let flagText = "";
+    if (lane.id === "") {
+      contract = "unassigned";
+    } else if (lane.items.length === 0) {
+      contract = "missing";
+      flagText = "빠진 비트";
+    } else if (lane.id === "cta" && lane.items.length !== 1) {
+      contract = "warn";
+      flagText = "CTA는 1개";
+    }
+    laneEl.dataset.contract = contract;
+
     const header = document.createElement("div");
     header.className = "beat-lane-header";
     header.style.setProperty("--lane-color", lane.color);
@@ -1250,6 +1266,12 @@ function renderBeatLanes() {
     count.className = "beat-lane-count";
     count.textContent = String(lane.items.length);
     header.append(dot, label, count);
+    if (flagText) {
+      const flag = document.createElement("span");
+      flag.className = "beat-lane-flag";
+      flag.textContent = flagText;
+      header.append(flag);
+    }
 
     const track = document.createElement("div");
     track.className = "beat-lane-track";
@@ -2643,6 +2665,27 @@ function disableBeatLaneMode(animate = true) {
   syncBeatLaneButton();
   renderPanels();
   if (animate) setStatus("캔버스 뷰로 전환했습니다.");
+}
+
+// Coverage panel → lane navigation: enter beat-lane mode (if needed), then scroll
+// the requested beat's lane into view and flash it. Called from the beat-coverage
+// chips in shotboard-ai.js.
+function focusBeatLane(beat) {
+  const wasActive = isBeatLaneMode;
+  if (!isBeatLaneMode) {
+    enableBeatLaneMode();
+  }
+  const selector = `.beat-lane[data-beat="${(window.CSS && CSS.escape) ? CSS.escape(beat ?? "") : (beat ?? "")}"]`;
+  const lane = board.querySelector(selector);
+  if (!lane) {
+    return;
+  }
+  lane.scrollIntoView({ behavior: wasActive ? "smooth" : "auto", block: "nearest" });
+  lane.classList.remove("is-flash");
+  void lane.offsetWidth; // restart the animation if the same lane is clicked again
+  lane.classList.add("is-flash");
+  const meta = window.ShonodeBeatMeta?.meta?.[beat];
+  if (meta) setStatus(`${meta.label} 레인으로 이동했습니다.`);
 }
 
 function applyCompactCards() {

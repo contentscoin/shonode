@@ -4417,3 +4417,56 @@ body.is-beat-lane-mode .caption-input {
   line-height: 1.5;
   color: var(--text-main);
 }
+
+/* ── Coverage panel ↔ beat-lane linkage ──────────────────────────────────── */
+/* Coverage chips are buttons that jump into the beat-lane view. */
+.beat-coverage-chip {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.beat-coverage-chip:hover {
+  filter: brightness(1.08);
+}
+
+.beat-coverage-chip:active {
+  transform: scale(0.96);
+}
+
+.beat-coverage-chip:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* Lane contract status mirrors the coverage panel warnings. */
+.beat-lane[data-contract="missing"] .beat-lane-header,
+.beat-lane[data-contract="warn"] .beat-lane-header {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.beat-lane[data-contract="missing"] {
+  border-style: dashed;
+}
+
+.beat-lane-flag {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(180, 83, 9, 0.14);
+  color: #b45309;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Flash a lane when it is navigated to from a coverage chip. */
+@keyframes beatLaneFlash {
+  0% { box-shadow: 0 0 0 0 rgba(127, 144, 242, 0.55); }
+  100% { box-shadow: 0 0 0 10px rgba(127, 144, 242, 0); }
+}
+
+.beat-lane.is-flash {
+  animation: beatLaneFlash 0.9s ease-out;
+}
