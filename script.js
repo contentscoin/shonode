@@ -1288,12 +1288,69 @@ function renderBeatLanes() {
     } else {
       lane.items.forEach((panel) => {
         const index = panels.indexOf(panel);
-        track.appendChild(createPanelElement(panel, index));
+        // createPanelElement may return a DocumentFragment (AI override) — grab
+        // the real .story-card element so the drag source binds to a node with
+        // a classList, not the fragment.
+        const produced = createPanelElement(panel, index);
+        const cardEl = produced.nodeType === Node.DOCUMENT_FRAGMENT_NODE
+          ? produced.querySelector(".story-card")
+          : produced;
+        track.appendChild(produced);
+        if (cardEl) {
+          attachBeatLaneDragSource(cardEl, panel.id);
+        }
       });
     }
 
+    // Each lane is a drop target: dropping a card reassigns its beat (only the
+    // beat — never x/y), pushes history, and re-renders so the card jumps lanes.
+    attachBeatLaneDropTarget(laneEl, track, lane);
+
     laneEl.append(header, track);
     board.appendChild(laneEl);
+  });
+}
+
+// Make a lane card draggable by its header handle (leaves the caption textarea
+// editable). Uses native HTML5 drag-and-drop, carrying the panel id.
+function attachBeatLaneDragSource(cardEl, panelId) {
+  const handle = cardEl.querySelector(".panel-handle") || cardEl.querySelector(".card-header");
+  if (!handle) return;
+  handle.setAttribute("draggable", "true");
+  handle.setAttribute("title", "드래그해 다른 비트 레인으로 이동");
+  handle.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData("text/plain", panelId);
+    event.dataTransfer.effectAllowed = "move";
+    cardEl.classList.add("is-lane-dragging");
+  });
+  handle.addEventListener("dragend", () => {
+    cardEl.classList.remove("is-lane-dragging");
+  });
+}
+
+// Wire a lane as a drop target that reassigns the dropped card's beat.
+function attachBeatLaneDropTarget(laneEl, track, lane) {
+  track.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    laneEl.classList.add("is-drop-target");
+  });
+  track.addEventListener("dragleave", (event) => {
+    if (!track.contains(event.relatedTarget)) {
+      laneEl.classList.remove("is-drop-target");
+    }
+  });
+  track.addEventListener("drop", (event) => {
+    event.preventDefault();
+    laneEl.classList.remove("is-drop-target");
+    const panelId = event.dataTransfer.getData("text/plain");
+    const panel = panelId ? getPanelById(panelId) : null;
+    if (!panel || panel.beat === lane.id) {
+      return;
+    }
+    pushHistoryState();
+    updatePanel(panelId, { beat: lane.id }, { announce: false });
+    setStatus(`컷을 ${lane.label} 비트로 옮겼습니다.`);
   });
 }
 

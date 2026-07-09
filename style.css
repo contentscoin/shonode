@@ -4316,7 +4316,25 @@ body.is-beat-lane-mode .panel-flow-row {
 }
 
 body.is-beat-lane-mode .panel-handle {
-  cursor: default;
+  cursor: grab;
+}
+
+body.is-beat-lane-mode .panel-handle:active {
+  cursor: grabbing;
+}
+
+/* Drag-to-reassign feedback */
+body.is-beat-lane-mode .story-card.is-lane-dragging {
+  opacity: 0.45;
+}
+
+.beat-lane.is-drop-target {
+  outline: 2px dashed var(--accent-strong);
+  outline-offset: -2px;
+}
+
+.beat-lane.is-drop-target .beat-lane-track {
+  background: var(--accent-soft);
 }
 
 /* Thumbnail: reveal ONLY the image media-panel (as a fixed-height preview) and
