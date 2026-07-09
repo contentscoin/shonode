@@ -4470,6 +4470,57 @@ body.is-beat-lane-mode .caption-input {
   color: var(--text-main);
 }
 
+/* ── Creative pattern recommendation chips (pattern_selection) ───────────── */
+.pattern-recommend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* display:flex above would defeat the UA [hidden] rule — restore it. */
+.pattern-recommend[hidden] {
+  display: none;
+}
+
+.pattern-recommend__label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-subtle);
+}
+
+.pattern-recommend__chip {
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--text-main);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pattern-recommend__chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.pattern-recommend__chip[data-selected="true"] {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.pattern-recommend__warning {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: #b45309;
+}
+
 /* ── Coverage panel ↔ beat-lane linkage ──────────────────────────────────── */
 /* Coverage chips are buttons that jump into the beat-lane view. */
 .beat-coverage-chip {

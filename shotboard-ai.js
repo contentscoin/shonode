@@ -71,6 +71,8 @@
   const productCategoryInputEl = document.getElementById("productCategoryInput");
   const hasProofAssetsInputEl = document.getElementById("hasProofAssetsInput");
   const qcRiskBadgeEl = document.getElementById("qcRiskBadge");
+  const creativePatternInputEl = document.getElementById("creativePatternInput");
+  const patternRecommendOutputEl = document.getElementById("patternRecommendOutput");
   const selectionDetailOutputEl = document.getElementById("selectionDetailOutput");
   const generatePlanButtonEl = document.getElementById("generatePlanButton");
   const generatePlanButtonLabelEl = document.getElementById("generatePlanButtonLabel");
@@ -335,12 +337,20 @@
     if (hasProofAssetsInputEl) {
       hasProofAssetsInputEl.checked = project.hasProofAssets === true;
     }
+    if (creativePatternInputEl) {
+      const patternId = project.pattern?.id ?? "";
+      const hasOption = Array.from(creativePatternInputEl.options).some((opt) => opt.value === patternId);
+      // Unknown/legacy ids (or pack absent) fall back to the auto option instead
+      // of a blank select (selectedIndex -1); project.pattern itself is kept.
+      creativePatternInputEl.value = hasOption ? patternId : "";
+    }
     renderWorkspaceLibrary();
     renderAiReferenceImages();
     renderAiOutputs();
     renderPreviewSidebar();
     renderBeatCoverage();
     renderQcRiskBadge();
+    renderPatternRecommendations();
   };
 
   persistProject = function overridePersistProject(...args) {
@@ -755,7 +765,11 @@
   // qc_gate intake wiring: keep the risk badge live as the operator edits the
   // brief, picks a product category, or toggles proof availability.
   populateProductCategorySelect();
-  aiBriefInputEl.addEventListener("input", renderQcRiskBadge);
+  populateCreativePatternSelect();
+  aiBriefInputEl.addEventListener("input", () => {
+    renderQcRiskBadge();
+    renderPatternRecommendations();
+  });
   // Discrete edits: snapshot first so each is its own undo step. These fields ride
   // in every history snapshot (cloneProject), so without this an unrelated undo
   // would silently revert the category / proof selection.
@@ -763,11 +777,32 @@
     pushHistoryState();
     updateProject({ productCategory: sanitizeProductCategory(productCategoryInputEl.value) }, { announce: false });
     renderQcRiskBadge();
+    renderPatternRecommendations();
   });
   hasProofAssetsInputEl?.addEventListener("change", () => {
     pushHistoryState();
     updateProject({ hasProofAssets: hasProofAssetsInputEl.checked }, { announce: false });
     renderQcRiskBadge();
+    renderPatternRecommendations();
+  });
+  creativePatternInputEl?.addEventListener("change", () => {
+    pushHistoryState();
+    updateProject({ pattern: buildPatternFromId(creativePatternInputEl.value) }, { announce: false });
+    renderPatternRecommendations();
+  });
+  patternRecommendOutputEl?.addEventListener("click", (event) => {
+    const chip = event.target.closest(".pattern-recommend__chip");
+    if (!chip) {
+      return;
+    }
+    const patternId = chip.dataset.patternId || "";
+    const next = project.pattern?.id === patternId ? null : buildPatternFromId(patternId);
+    pushHistoryState();
+    updateProject({ pattern: next }, { announce: false });
+    if (creativePatternInputEl) {
+      creativePatternInputEl.value = next?.id ?? "";
+    }
+    renderPatternRecommendations();
   });
 
   // Coverage panel ↔ beat lane: clicking a coverage chip jumps into beat-lane
@@ -2653,6 +2688,29 @@
     connectionLayerEl.setAttribute("viewBox", `0 0 ${canvasWidth} ${canvasHeight}`);
   }
 
+  // Shared by full generation AND selected-cut regeneration so both flows honour
+  // the same qc_gate ruling and creative-pattern grammar.
+  // - qcDirective: claim-safe ruling as a SEPARATE field (never mutates the brief,
+  //   so the local fallback's brief parsing stays clean).
+  // - patternDirective: the chosen creative pattern's grammar + risk control.
+  function buildGenerationDirectives(brief) {
+    const pack = window.ShonodeAdPack;
+    const qcRisk = pack && typeof pack.classifyProductRisk === "function"
+      ? pack.classifyProductRisk({
+          categoryId: project.productCategory,
+          hasProof: project.hasProofAssets === true,
+          brief
+        })
+      : null;
+    const qcDirective = qcRisk && pack && typeof pack.buildQcDirective === "function"
+      ? pack.buildQcDirective(qcRisk)
+      : "";
+    const patternDirective = project.pattern && pack && typeof pack.buildPatternDirective === "function"
+      ? pack.buildPatternDirective(project.pattern, { hasProof: project.hasProofAssets === true })
+      : "";
+    return { qcRisk, qcDirective, patternDirective };
+  }
+
   async function handleGeneratePlan() {
     const brief = project.aiBrief?.trim();
     if (!brief) {
@@ -2666,26 +2724,14 @@
     setStatus("브리프를 분석해 컷 초안을 생성하고 있습니다.");
 
     try {
-      // qc_gate — classify product risk and pass a claim-safe directive to the
-      // provider as a SEPARATE field (never mutate the brief itself, so the local
-      // fallback's brief parsing stays clean).
-      const pack = window.ShonodeAdPack;
-      const qcRisk = pack && typeof pack.classifyProductRisk === "function"
-        ? pack.classifyProductRisk({
-            categoryId: project.productCategory,
-            hasProof: project.hasProofAssets === true,
-            brief
-          })
-        : null;
-      const qcDirective = qcRisk && pack && typeof pack.buildQcDirective === "function"
-        ? pack.buildQcDirective(qcRisk)
-        : "";
+      const { qcRisk, qcDirective, patternDirective } = buildGenerationDirectives(brief);
 
       const payload = {
         brief,
         project: cloneProject(),
         qcRisk,
         qcDirective,
+        patternDirective,
         existingPanelCount: panels.length,
         referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),
         referenceImageCount: aiReferenceImages.length,
@@ -2944,6 +2990,78 @@
     qcRiskBadgeEl.innerHTML =
       `<div class="qc-risk-badge__row">${parts.join("")}</div>`
       + `<p class="qc-risk-badge__detail">${escapeHtml(result.detail)}</p>`;
+  }
+
+  // pattern_selection — fill the "크리에이티브 패턴" select from the pack matrix
+  // so option ids/labels never drift from the recommendation heuristic.
+  function populateCreativePatternSelect() {
+    if (!creativePatternInputEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    const patterns = Array.isArray(pack?.creativePatterns) ? pack.creativePatterns : [];
+    const options = [`<option value="">자동 — AI가 브리프에 맞게 선택</option>`]
+      .concat(patterns.map((p) =>
+        `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)} · ${escapeHtml(p.when)}</option>`
+      ))
+      .join("");
+    creativePatternInputEl.innerHTML = options;
+  }
+
+  function buildPatternFromId(patternId) {
+    const pack = window.ShonodeAdPack;
+    const meta = Array.isArray(pack?.creativePatterns)
+      ? pack.creativePatterns.find((p) => p.id === patternId)
+      : null;
+    if (!meta) {
+      return null;
+    }
+    return { id: meta.id, name: meta.label, sourceFamily: meta.sourceFamily };
+  }
+
+  // Kernel-matrix recommendations for the current intake, rendered as clickable
+  // chips. Also warns when proof_experiment is chosen without proof assets.
+  function renderPatternRecommendations() {
+    if (!patternRecommendOutputEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.recommendPatterns !== "function") {
+      patternRecommendOutputEl.hidden = true;
+      return;
+    }
+
+    const brief = (project.aiBrief || "").trim();
+    if (!brief) {
+      patternRecommendOutputEl.hidden = true;
+      return;
+    }
+
+    const input = {
+      categoryId: project.productCategory,
+      hasProof: project.hasProofAssets === true,
+      brief
+    };
+    const recommendations = pack.recommendPatterns(input);
+    const selectedId = project.pattern?.id || "";
+
+    const chips = recommendations.map((p) =>
+      `<button type="button" class="pattern-recommend__chip" data-pattern-id="${escapeHtml(p.id)}"`
+      + ` data-selected="${p.id === selectedId}" title="${escapeHtml(p.when)} — ${escapeHtml(p.risk)}">`
+      + `${escapeHtml(p.label)}</button>`
+    ).join("");
+
+    let warning = "";
+    const selectedMeta = Array.isArray(pack.creativePatterns)
+      ? pack.creativePatterns.find((p) => p.id === selectedId)
+      : null;
+    if (selectedMeta?.requiresProof && !input.hasProof) {
+      warning = `<p class="pattern-recommend__warning">증빙 없이 ${escapeHtml(selectedMeta.label)} 패턴은 권장되지 않습니다 — 증거 날조 금지 규칙이 적용됩니다.</p>`;
+    }
+
+    patternRecommendOutputEl.hidden = false;
+    patternRecommendOutputEl.innerHTML =
+      `<span class="pattern-recommend__label">추천</span>${chips}${warning}`;
   }
 
   function renderSelectionDetail() {
@@ -3990,10 +4108,14 @@
     setStatus("선택한 컷만 다시 정리하고 있습니다.");
 
     try {
+      const regenDirectives = buildGenerationDirectives(brief);
       const payload = {
         generationMode: "selected-panels",
         brief,
         project: cloneProject(),
+        qcRisk: regenDirectives.qcRisk,
+        qcDirective: regenDirectives.qcDirective,
+        patternDirective: regenDirectives.patternDirective,
         selectedPanelCount: orderedSelectedPanels.length,
         selectedPanels: buildSelectedPanelsPayload(orderedSelectedPanels),
         referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),

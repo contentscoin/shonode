@@ -77,6 +77,133 @@
     // proof regardless of category.
     claimLanguageKeywords: ["효과", "효능", "1위", "최고", "최저가", "검증", "임상", "특허", "인증", "수상", "후기", "리뷰", "보장", "%", "증가", "감소", "개선"],
 
+    // pattern_selection step 2 — creative pattern matrix, distilled from the
+    // OpenCrab kernel pack "Pattern Selection Matrix" (award corpus 1,890 +
+    // Dolphiners corpus 162 records). `when` mirrors the matrix input condition,
+    // `risk` its risk-control column; sourceFamily matches PATTERN_SOURCE_FAMILIES.
+    creativePatterns: [
+      {
+        id: "delightful_twist_demo",
+        label: "반전 데모",
+        sourceFamily: "hybrid",
+        when: "제품 시연에 예상 밖의 반전을 얹을 수 있을 때 (코퍼스 최다 검증 패턴)",
+        why: "제품이 재미의 엔진이 되는 가장 검증된 패턴",
+        risk: "제품을 빼도 같은 재미가 남으면 리라이트"
+      },
+      {
+        id: "proof_experiment",
+        label: "증명 실험",
+        sourceFamily: "award",
+        requiresProof: true,
+        when: "증빙·비교·측정 결과·전문가 근거·성분 스토리가 있을 때",
+        why: "클레임을 눈에 보이고 검증 가능하게 만듦",
+        risk: "증거 날조 금지 — 제출된 증빙 범위 안에서만"
+      },
+      {
+        id: "problem_relief",
+        label: "문제 해소",
+        sourceFamily: "award",
+        when: "일상 속 마찰·불편이 있지만 증빙이 제한적일 때",
+        why: "공감 가는 순간 속에서 제품을 유용하게 보여줌",
+        risk: "효능 주장 대신 루틴·상황 언어 사용"
+      },
+      {
+        id: "absurd_product_demo",
+        label: "부조리 데모",
+        sourceFamily: "dolphiners",
+        when: "제품이 불가능한 상황을 만들어내는 오브젝트가 될 수 있을 때",
+        why: "제품이 개그의 엔진이 됨",
+        risk: "반전의 원인은 반드시 제품이어야 함"
+      },
+      {
+        id: "story_first_branded_film",
+        label: "스토리 브랜디드 필름",
+        sourceFamily: "award",
+        when: "브랜드가 엔터테인먼트 우선 내러티브를 감당할 수 있을 때",
+        why: "롱폼·크래프트 주도 서사에 유용",
+        risk: "최종 팩샷 전에 브랜드 기억 요소가 먼저 등장해야 함"
+      },
+      {
+        id: "genre_parody_longform",
+        label: "장르 패러디",
+        sourceFamily: "dolphiners",
+        when: "신뢰를 해치지 않고 알려진 장르 문법을 패러디할 수 있을 때",
+        why: "시청자가 이미 아는 서사 문법을 즐기게 함",
+        risk: "원작 장면·배우·대사 복제 금지"
+      },
+      {
+        id: "cultural_participation",
+        label: "문화 참여",
+        sourceFamily: "award",
+        when: "공적 의례·팬덤·챌린지·사회적 행동에 합류할 수 있을 때",
+        why: "관객의 행동이 곧 배포가 됨",
+        risk: "위험하거나 배타적인 참여 유도 금지"
+      },
+      {
+        id: "surreal_product_metaphor",
+        label: "초현실 은유",
+        sourceFamily: "award",
+        when: "제품이 시각·감각·패키지·오브젝트 중심일 때",
+        why: "빠른 제품 기억을 만듦",
+        risk: "제품과 동떨어진 로고 장난 금지"
+      },
+      {
+        id: "meme_collision",
+        label: "밈 충돌",
+        sourceFamily: "dolphiners",
+        when: "한국형(돌고래유괴단 스타일) 브랜디드 콘텐츠를 원할 때",
+        why: "콘텐츠로 시작해 브랜드 기억으로 귀결",
+        risk: "재미가 제품 역할을 가리면 안 됨"
+      }
+    ],
+
+    // Kernel matrix heuristic: rank the top-3 patterns for the current intake.
+    // Mirrors the matrix rules — proof_experiment is NEVER recommended without
+    // proof, and claim-safe mode prefers claim-free relatable patterns.
+    recommendPatterns(input = {}) {
+      const brief = typeof input.brief === "string" ? input.brief.toLowerCase() : "";
+      const hasProof = Boolean(input.hasProof);
+      const risk = this.classifyProductRisk(input);
+      const has = (kws) => kws.some((kw) => brief.includes(kw));
+
+      let ids;
+      if (has(["챌린지", "참여", "팬덤", "밈", "유행"])) {
+        ids = ["cultural_participation", "meme_collision", "delightful_twist_demo"];
+      } else if (has(["웃긴", "유머", "개그", "병맛", "코믹", "부조리"])) {
+        ids = ["absurd_product_demo", "meme_collision", "genre_parody_longform"];
+      } else if (hasProof) {
+        ids = ["proof_experiment", "delightful_twist_demo", "problem_relief"];
+      } else if (risk.ruling === "claim_safe_rewrite" || risk.level === "proof_required") {
+        // No usable proof: keep claims out — relatable/sensory patterns only.
+        ids = ["problem_relief", "surreal_product_metaphor", "story_first_branded_film"];
+      } else {
+        ids = ["delightful_twist_demo", "surreal_product_metaphor", "absurd_product_demo"];
+      }
+
+      return ids
+        .map((id) => this.creativePatterns.find((p) => p.id === id))
+        .filter(Boolean);
+    },
+
+    // Korean directive injected into the generation prompt when a pattern is
+    // chosen; mirrors the kernel's pattern + risk-control contract.
+    buildPatternDirective(pattern, input = {}) {
+      if (!pattern || !pattern.id) {
+        return "";
+      }
+      const meta = this.creativePatterns.find((p) => p.id === pattern.id);
+      if (!meta) {
+        return "";
+      }
+      const lines = [
+        `[크리에이티브 패턴] ${meta.label}(${meta.id}) 패턴으로 스토리보드를 구성하세요. ${meta.why}. 리스크 컨트롤: ${meta.risk}.`
+      ];
+      if (meta.requiresProof && !input.hasProof) {
+        lines.push("주의: 증빙 자료가 없으므로 실험·증명 장면에서 증거·수치·비교 결과를 날조하지 말고, 감각적 시연으로 대체하세요.");
+      }
+      return lines.join(" ");
+    },
+
     // qc_gate classifier — client-side product-risk + proof judgement.
     // Mirrors qcGateRules. Returns { level, ruling, categoryId, categoryLabel,
     // detected, matchedKeywords, headline, detail } where:
