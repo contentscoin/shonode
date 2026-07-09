@@ -992,7 +992,12 @@
   };
 
   document.body.classList.remove("is-sidebar-collapsed", "is-preview-collapsed");
-  project = normalizeProject(project);
+  // Re-read the project from storage now that the rich normalizeProject override
+  // is installed. At boot script.js ran the BASE normalizeProject, which rebuilds
+  // the object from base fields only — stripping aiBrief, pattern,
+  // productCategory, hasProofAssets, and claimLog from the in-memory copy.
+  // (Panels survive boot because base normalizePanel spreads `...source`.)
+  project = loadProject();
   panels = panels.map((panel, index) => normalizePanel(panel, index));
   renderProjectSidebar();
   applySidebarRailState(false);
