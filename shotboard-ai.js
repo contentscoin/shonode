@@ -2716,6 +2716,33 @@
     return { qcRisk, qcDirective, patternDirective };
   }
 
+  // final_output_contract — validate the current board against the six-beat
+  // contract + claim-safety rules (non-LLM). Pure compute; callers decide
+  // whether to store claimFindings into project.claimLog.
+  function buildOutputContractReport() {
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.validateOutputContract !== "function") {
+      return null;
+    }
+    const cuts = panels.map((panel) => ({
+      panelId: panel.id,
+      beat: panel.beat,
+      caption: panel.caption || "",
+      promptText: [panel.t2iPrompt, panel.i2vStartPrompt, panel.i2vMotionPrompt, panel.i2vEndPrompt]
+        .filter(Boolean)
+        .join(" ")
+    }));
+    const hasProof = project.hasProofAssets === true;
+    const risk = typeof pack.classifyProductRisk === "function"
+      ? pack.classifyProductRisk({
+          categoryId: project.productCategory,
+          hasProof,
+          brief: project.aiBrief || ""
+        })
+      : null;
+    return pack.validateOutputContract({ cuts, risk, hasProof });
+  }
+
   async function handleGeneratePlan() {
     const brief = project.aiBrief?.trim();
     if (!brief) {
@@ -3749,6 +3776,9 @@
         scrollTop: canvasViewport.scrollTop,
         beatLaneMode: isBeatLaneMode === true
       },
+      // final_output_contract report — advisory snapshot of contract compliance
+      // at save time (import ignores it; recomputed on the next export).
+      contract: buildOutputContractReport(),
       sidebar: {
         leftSections: [...activeLeftSidebarSections],
         rightSections: [...activeRightSidebarSections],
@@ -3770,6 +3800,15 @@
   async function handleExportWorkspace() {
     await window.ShonodePanelImageStorage?.ready?.();
     await window.ShonodePanelImageStorage?.flush?.();
+
+    // final_output_contract — validate before export and record claim findings
+    // into project.claimLog so the exported file carries the audit trail.
+    // Derived data: no history snapshot (recomputed on every export).
+    const contract = buildOutputContractReport();
+    if (contract) {
+      updateProject({ claimLog: contract.claimFindings }, { announce: false });
+    }
+
     const snapshot = createWorkspaceExportSnapshot();
     const fileName = `${sanitizeWorkspaceFileName(project.title)}-${new Date().toISOString().slice(0, 10)}.shonode`;
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/x-shonode+json" });
@@ -3781,7 +3820,14 @@
     downloadLink.click();
     downloadLink.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    setStatus("프로젝트를 내보냈습니다.");
+
+    if (contract && !contract.pass) {
+      setStatus(`프로젝트를 내보냈습니다 — 계약 경고 ${contract.problems.length}건: ${contract.problems[0]}`, "warning");
+    } else if (contract && contract.claimFindings.length > 0) {
+      setStatus(`프로젝트를 내보냈습니다 — 클레임 표현 ${contract.claimFindings.length}건이 claimLog에 기록되었습니다.`);
+    } else {
+      setStatus("프로젝트를 내보냈습니다 — 6비트 계약 충족.");
+    }
   }
 
   async function handleImportWorkspaceInputChange(event) {

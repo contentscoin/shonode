@@ -301,6 +301,84 @@
       return "";
     },
 
+    // final_output_contract — non-LLM validation of the finished board against
+    // the six-beat contract and claim-safety rules. Pure function: takes cut
+    // digests, returns a report; the app decides how to surface/store it.
+    //   cuts: [{ panelId, beat, caption, promptText }]
+    //   risk: result of classifyProductRisk (or null)
+    // Returns { pass, problems: string[], claimFindings: [{claimText, riskLevel, ruling, panelId}] }
+    validateOutputContract(input = {}) {
+      const cuts = Array.isArray(input.cuts) ? input.cuts : [];
+      const risk = input.risk || null;
+      const hasProof = Boolean(input.hasProof);
+      const problems = [];
+
+      const beatOrder = this.sixBeatContract.map((item) => item.beat);
+      const counts = Object.fromEntries(beatOrder.map((beat) => [beat, 0]));
+      let unassigned = 0;
+      cuts.forEach((cut) => {
+        if (counts[cut.beat] !== undefined) counts[cut.beat] += 1;
+        else unassigned += 1;
+      });
+
+      const missing = beatOrder.filter((beat) => counts[beat] === 0);
+      if (missing.length > 0) {
+        problems.push(`빠진 비트: ${missing.join(", ")}`);
+      }
+      if (counts.cta !== 1) {
+        problems.push(`CTA는 정확히 1개여야 합니다 (현재 ${counts.cta}개)`);
+      }
+      if (unassigned > 0) {
+        problems.push(`비트 미지정 컷 ${unassigned}개`);
+      }
+
+      // Beat order must be non-decreasing along the cut sequence.
+      let lastIndex = -1;
+      let outOfOrder = false;
+      cuts.forEach((cut) => {
+        const index = beatOrder.indexOf(cut.beat);
+        if (index === -1) return;
+        if (index < lastIndex) outOfOrder = true;
+        lastIndex = index;
+      });
+      if (outOfOrder) {
+        problems.push("비트 순서가 계약 순서(훅→긴장→반전→증명→환희→CTA)를 벗어났습니다");
+      }
+
+      const incomplete = cuts.filter((cut) =>
+        !(typeof cut.caption === "string" && cut.caption.trim())
+        || !(typeof cut.promptText === "string" && cut.promptText.trim())
+      ).length;
+      if (incomplete > 0) {
+        problems.push(`설명 또는 이미지 프롬프트가 비어 있는 컷 ${incomplete}개`);
+      }
+
+      // Claim scan: measurable/comparative claim language in captions/prompts.
+      // Ruling mirrors the qc_gate: proof → allowed; high-risk without proof →
+      // blocked (claim-safe mode forbids claims outright); otherwise rewrite.
+      const claimFindings = [];
+      const ruling = hasProof ? "allowed" : (risk && risk.level === "high" ? "blocked" : "claim_safe_rewrite");
+      const riskLevel = risk && ["low", "proof_required", "high"].includes(risk.level) ? risk.level : "low";
+      cuts.forEach((cut) => {
+        const text = `${cut.caption || ""} ${cut.promptText || ""}`;
+        const lower = text.toLowerCase();
+        const hits = this.claimLanguageKeywords.filter((kw) => lower.includes(kw.toLowerCase()));
+        if (hits.length > 0) {
+          claimFindings.push({
+            claimText: `${hits.slice(0, 4).join(", ")} — ${String(cut.caption || "").slice(0, 60)}`,
+            riskLevel,
+            ruling,
+            panelId: typeof cut.panelId === "string" ? cut.panelId : ""
+          });
+        }
+      });
+      if (claimFindings.length > 0 && ruling === "blocked") {
+        problems.push(`클레임 세이프 모드인데 주장 표현이 감지된 컷 ${claimFindings.length}개`);
+      }
+
+      return { pass: problems.length === 0, problems, claimFindings };
+    },
+
     buildPromptSection() {
       const beats = this.sixBeatContract
         .map((item) => `  - ${item.beat} (${item.window}): ${item.role}`)
