@@ -39,6 +39,346 @@
       "Reinterpret reference images into newly art-directed frames; never recreate a reference frame literally (keep reference distance)."
     ],
 
+    // qc_gate step 1 — product risk taxonomy. These are the canonical options
+    // shown in the brief intake "제품 카테고리" select. `risk` classifies the
+    // category itself; the final claim ruling also depends on proof availability.
+    // Keyword arrays let the classifier guess a category from a free-form brief
+    // when the operator has not picked one explicitly.
+    productRiskCategories: [
+      { id: "sensory", label: "일반 · 감각재화", risk: "low", keywords: [] },
+      {
+        id: "health-functional",
+        label: "건강기능식품",
+        risk: "high",
+        keywords: ["건강기능", "건기식", "다이어트", "체지방", "혈당", "혈압", "면역", "유산균", "프로바이오", "콜라겐", "루테인", "오메가", "관절", "피로회복", "숙취", "영양제"]
+      },
+      {
+        id: "medical",
+        label: "의료 · 의약품",
+        risk: "high",
+        keywords: ["의료", "의약", "병원", "치료", "질환", "질병", "처방", "임상시험", "부작용", "진단", "시술", "성형"]
+      },
+      {
+        id: "cosmetics-efficacy",
+        label: "화장품 (효능 강조)",
+        risk: "high",
+        keywords: ["미백", "주름개선", "탄력", "안티에이징", "여드름", "모공", "재생", "잡티", "기미", "화이트닝", "리프팅"]
+      },
+      {
+        id: "finance",
+        label: "금융 · 투자",
+        risk: "high",
+        keywords: ["투자", "수익률", "금융", "대출", "보험", "펀드", "코인", "주식", "재테크", "이자", "적금", "보장", "원금"]
+      },
+      { id: "other", label: "기타 · 미분류", risk: "unknown", keywords: [] }
+    ],
+
+    // Generic claim-language markers: measurable/comparative claims that need
+    // proof regardless of category.
+    claimLanguageKeywords: ["효과", "효능", "1위", "최고", "최저가", "검증", "임상", "특허", "인증", "수상", "후기", "리뷰", "보장", "%", "증가", "감소", "개선"],
+
+    // pattern_selection step 2 — creative pattern matrix, distilled from the
+    // OpenCrab kernel pack "Pattern Selection Matrix" (award corpus 1,890 +
+    // Dolphiners corpus 162 records). `when` mirrors the matrix input condition,
+    // `risk` its risk-control column; sourceFamily matches PATTERN_SOURCE_FAMILIES.
+    creativePatterns: [
+      {
+        id: "delightful_twist_demo",
+        label: "반전 데모",
+        sourceFamily: "hybrid",
+        when: "제품 시연에 예상 밖의 반전을 얹을 수 있을 때 (코퍼스 최다 검증 패턴)",
+        why: "제품이 재미의 엔진이 되는 가장 검증된 패턴",
+        risk: "제품을 빼도 같은 재미가 남으면 리라이트"
+      },
+      {
+        id: "proof_experiment",
+        label: "증명 실험",
+        sourceFamily: "award",
+        requiresProof: true,
+        when: "증빙·비교·측정 결과·전문가 근거·성분 스토리가 있을 때",
+        why: "클레임을 눈에 보이고 검증 가능하게 만듦",
+        risk: "증거 날조 금지 — 제출된 증빙 범위 안에서만"
+      },
+      {
+        id: "problem_relief",
+        label: "문제 해소",
+        sourceFamily: "award",
+        when: "일상 속 마찰·불편이 있지만 증빙이 제한적일 때",
+        why: "공감 가는 순간 속에서 제품을 유용하게 보여줌",
+        risk: "효능 주장 대신 루틴·상황 언어 사용"
+      },
+      {
+        id: "absurd_product_demo",
+        label: "부조리 데모",
+        sourceFamily: "dolphiners",
+        when: "제품이 불가능한 상황을 만들어내는 오브젝트가 될 수 있을 때",
+        why: "제품이 개그의 엔진이 됨",
+        risk: "반전의 원인은 반드시 제품이어야 함"
+      },
+      {
+        id: "story_first_branded_film",
+        label: "스토리 브랜디드 필름",
+        sourceFamily: "award",
+        when: "브랜드가 엔터테인먼트 우선 내러티브를 감당할 수 있을 때",
+        why: "롱폼·크래프트 주도 서사에 유용",
+        risk: "최종 팩샷 전에 브랜드 기억 요소가 먼저 등장해야 함"
+      },
+      {
+        id: "genre_parody_longform",
+        label: "장르 패러디",
+        sourceFamily: "dolphiners",
+        when: "신뢰를 해치지 않고 알려진 장르 문법을 패러디할 수 있을 때",
+        why: "시청자가 이미 아는 서사 문법을 즐기게 함",
+        risk: "원작 장면·배우·대사 복제 금지"
+      },
+      {
+        id: "cultural_participation",
+        label: "문화 참여",
+        sourceFamily: "award",
+        when: "공적 의례·팬덤·챌린지·사회적 행동에 합류할 수 있을 때",
+        why: "관객의 행동이 곧 배포가 됨",
+        risk: "위험하거나 배타적인 참여 유도 금지"
+      },
+      {
+        id: "surreal_product_metaphor",
+        label: "초현실 은유",
+        sourceFamily: "award",
+        when: "제품이 시각·감각·패키지·오브젝트 중심일 때",
+        why: "빠른 제품 기억을 만듦",
+        risk: "제품과 동떨어진 로고 장난 금지"
+      },
+      {
+        id: "meme_collision",
+        label: "밈 충돌",
+        sourceFamily: "dolphiners",
+        when: "한국형(돌고래유괴단 스타일) 브랜디드 콘텐츠를 원할 때",
+        why: "콘텐츠로 시작해 브랜드 기억으로 귀결",
+        risk: "재미가 제품 역할을 가리면 안 됨"
+      }
+    ],
+
+    // Kernel matrix heuristic: rank the top-3 patterns for the current intake.
+    // Mirrors the matrix rules — proof_experiment is NEVER recommended without
+    // proof, and claim-safe mode prefers claim-free relatable patterns.
+    recommendPatterns(input = {}) {
+      const brief = typeof input.brief === "string" ? input.brief.toLowerCase() : "";
+      const hasProof = Boolean(input.hasProof);
+      const risk = this.classifyProductRisk(input);
+      const has = (kws) => kws.some((kw) => brief.includes(kw));
+
+      let ids;
+      if (has(["챌린지", "참여", "팬덤", "밈", "유행"])) {
+        ids = ["cultural_participation", "meme_collision", "delightful_twist_demo"];
+      } else if (has(["웃긴", "유머", "개그", "병맛", "코믹", "부조리"])) {
+        ids = ["absurd_product_demo", "meme_collision", "genre_parody_longform"];
+      } else if (hasProof) {
+        ids = ["proof_experiment", "delightful_twist_demo", "problem_relief"];
+      } else if (risk.ruling === "claim_safe_rewrite" || risk.level === "proof_required") {
+        // No usable proof: keep claims out — relatable/sensory patterns only.
+        ids = ["problem_relief", "surreal_product_metaphor", "story_first_branded_film"];
+      } else {
+        ids = ["delightful_twist_demo", "surreal_product_metaphor", "absurd_product_demo"];
+      }
+
+      return ids
+        .map((id) => this.creativePatterns.find((p) => p.id === id))
+        .filter(Boolean);
+    },
+
+    // Korean directive injected into the generation prompt when a pattern is
+    // chosen; mirrors the kernel's pattern + risk-control contract.
+    buildPatternDirective(pattern, input = {}) {
+      if (!pattern || !pattern.id) {
+        return "";
+      }
+      const meta = this.creativePatterns.find((p) => p.id === pattern.id);
+      if (!meta) {
+        return "";
+      }
+      const lines = [
+        `[크리에이티브 패턴] ${meta.label}(${meta.id}) 패턴으로 스토리보드를 구성하세요. ${meta.why}. 리스크 컨트롤: ${meta.risk}.`
+      ];
+      if (meta.requiresProof && !input.hasProof) {
+        lines.push("주의: 증빙 자료가 없으므로 실험·증명 장면에서 증거·수치·비교 결과를 날조하지 말고, 감각적 시연으로 대체하세요.");
+      }
+      return lines.join(" ");
+    },
+
+    // qc_gate classifier — client-side product-risk + proof judgement.
+    // Mirrors qcGateRules. Returns { level, ruling, categoryId, categoryLabel,
+    // detected, matchedKeywords, headline, detail } where:
+    //   level  ∈ low | proof_required | high      (matches CLAIM_RISK_LEVELS)
+    //   ruling ∈ allowed | claim_safe_rewrite     (matches CLAIM_RULINGS)
+    classifyProductRisk(input = {}) {
+      const brief = typeof input.brief === "string" ? input.brief : "";
+      const hasProof = Boolean(input.hasProof);
+      const lower = brief.toLowerCase();
+
+      const known = this.productRiskCategories.find((cat) => cat.id === input.categoryId);
+      let category = known && known.id !== "other" ? known : null;
+      let detected = false;
+      const matchedKeywords = [];
+
+      // When no explicit high-risk category is chosen, scan the brief.
+      if (!category || category.risk !== "high") {
+        for (const cat of this.productRiskCategories) {
+          if (cat.risk !== "high") continue;
+          const hits = cat.keywords.filter((kw) => lower.includes(kw.toLowerCase()));
+          if (hits.length > 0) {
+            category = cat;
+            detected = !known || known.id === "other";
+            matchedKeywords.push(...hits);
+            break;
+          }
+        }
+      }
+
+      const claimHits = this.claimLanguageKeywords.filter((kw) => lower.includes(kw.toLowerCase()));
+      const effective = category || known || this.productRiskCategories[0];
+
+      let level = "low";
+      let ruling = "allowed";
+      let headline = "저위험";
+      let detail = "감각·정서 소구 중심으로 자유롭게 생성합니다.";
+
+      if (effective.risk === "high") {
+        if (hasProof) {
+          level = "proof_required";
+          ruling = "allowed";
+          headline = "증빙 필요 · 검증 자료 확보";
+          detail = "제출한 증빙 범위 안에서만 효능·수치를 주장하세요. 근거 없는 과장은 금지됩니다.";
+        } else {
+          level = "high";
+          ruling = "claim_safe_rewrite";
+          headline = "고위험 · 클레임 세이프 모드";
+          detail = "증빙이 없어 효능·순위·수치 주장 없이 컨셉만 생성합니다. 통계·수상·후기 날조 금지.";
+        }
+      } else if (claimHits.length > 0) {
+        matchedKeywords.push(...claimHits);
+        if (hasProof) {
+          level = "low";
+          ruling = "allowed";
+          headline = "저위험 · 주장 근거 확보";
+          detail = "제출한 증빙 범위 안에서 주장하세요.";
+        } else {
+          level = "proof_required";
+          ruling = "allowed";
+          headline = "증빙 필요";
+          detail = "수치·효능·순위 주장을 넣으려면 증빙 자료가 필요합니다. 없으면 감각 소구로 전환하세요.";
+        }
+      }
+
+      return {
+        level,
+        ruling,
+        hasProof,
+        categoryId: effective.id,
+        categoryLabel: effective.label,
+        detected,
+        matchedKeywords: Array.from(new Set(matchedKeywords)).slice(0, 6),
+        headline,
+        detail
+      };
+    },
+
+    // Turns a classifyProductRisk result into a Korean directive passed to every
+    // provider so generation honours the same qc_gate ruling. proof_required has
+    // two distinct meanings (high-risk WITH proof vs. claim-language WITHOUT
+    // proof); the directive must match the on-screen badge in both.
+    buildQcDirective(result) {
+      if (!result) {
+        return "";
+      }
+      if (result.ruling === "claim_safe_rewrite") {
+        return "[QC 게이트 · 클레임 세이프 모드] 고위험 제품이며 증빙 자료가 없습니다. 효능·순위·측정 가능한 이점·통계·수상·후기·전문가 보증을 절대 만들지 말고, 클레임 없는 컨셉 스켈레톤만 생성하세요.";
+      }
+      if (result.level === "proof_required") {
+        if (result.hasProof) {
+          return "[QC 게이트] 고위험 제품이지만 증빙 자료가 제출되었습니다. 제출된 증빙 범위 안의 효능·수치만 주장하고, 증빙을 벗어난 과장·순위·통계·후기·전문가 보증은 만들지 마세요.";
+        }
+        return "[QC 게이트] 증빙 자료가 확인되지 않았습니다. 효능·수치·순위 등 검증이 필요한 주장은 넣지 말고, 감각·상황 소구 중심으로 컷을 구성하세요.";
+      }
+      return "";
+    },
+
+    // final_output_contract — non-LLM validation of the finished board against
+    // the six-beat contract and claim-safety rules. Pure function: takes cut
+    // digests, returns a report; the app decides how to surface/store it.
+    //   cuts: [{ panelId, beat, caption, promptText }]
+    //   risk: result of classifyProductRisk (or null)
+    // Returns { pass, problems: string[], claimFindings: [{claimText, riskLevel, ruling, panelId}] }
+    validateOutputContract(input = {}) {
+      const cuts = Array.isArray(input.cuts) ? input.cuts : [];
+      const risk = input.risk || null;
+      const hasProof = Boolean(input.hasProof);
+      const problems = [];
+
+      const beatOrder = this.sixBeatContract.map((item) => item.beat);
+      const counts = Object.fromEntries(beatOrder.map((beat) => [beat, 0]));
+      let unassigned = 0;
+      cuts.forEach((cut) => {
+        if (counts[cut.beat] !== undefined) counts[cut.beat] += 1;
+        else unassigned += 1;
+      });
+
+      const missing = beatOrder.filter((beat) => counts[beat] === 0);
+      if (missing.length > 0) {
+        problems.push(`빠진 비트: ${missing.join(", ")}`);
+      }
+      if (counts.cta !== 1) {
+        problems.push(`CTA는 정확히 1개여야 합니다 (현재 ${counts.cta}개)`);
+      }
+      if (unassigned > 0) {
+        problems.push(`비트 미지정 컷 ${unassigned}개`);
+      }
+
+      // Beat order must be non-decreasing along the cut sequence.
+      let lastIndex = -1;
+      let outOfOrder = false;
+      cuts.forEach((cut) => {
+        const index = beatOrder.indexOf(cut.beat);
+        if (index === -1) return;
+        if (index < lastIndex) outOfOrder = true;
+        lastIndex = index;
+      });
+      if (outOfOrder) {
+        problems.push("비트 순서가 계약 순서(훅→긴장→반전→증명→환희→CTA)를 벗어났습니다");
+      }
+
+      const incomplete = cuts.filter((cut) =>
+        !(typeof cut.caption === "string" && cut.caption.trim())
+        || !(typeof cut.promptText === "string" && cut.promptText.trim())
+      ).length;
+      if (incomplete > 0) {
+        problems.push(`설명 또는 이미지 프롬프트가 비어 있는 컷 ${incomplete}개`);
+      }
+
+      // Claim scan: measurable/comparative claim language in captions/prompts.
+      // Ruling mirrors the qc_gate: proof → allowed; high-risk without proof →
+      // blocked (claim-safe mode forbids claims outright); otherwise rewrite.
+      const claimFindings = [];
+      const ruling = hasProof ? "allowed" : (risk && risk.level === "high" ? "blocked" : "claim_safe_rewrite");
+      const riskLevel = risk && ["low", "proof_required", "high"].includes(risk.level) ? risk.level : "low";
+      cuts.forEach((cut) => {
+        const text = `${cut.caption || ""} ${cut.promptText || ""}`;
+        const lower = text.toLowerCase();
+        const hits = this.claimLanguageKeywords.filter((kw) => lower.includes(kw.toLowerCase()));
+        if (hits.length > 0) {
+          claimFindings.push({
+            claimText: `${hits.slice(0, 4).join(", ")} — ${String(cut.caption || "").slice(0, 60)}`,
+            riskLevel,
+            ruling,
+            panelId: typeof cut.panelId === "string" ? cut.panelId : ""
+          });
+        }
+      });
+      if (claimFindings.length > 0 && ruling === "blocked") {
+        problems.push(`클레임 세이프 모드인데 주장 표현이 감지된 컷 ${claimFindings.length}개`);
+      }
+
+      return { pass: problems.length === 0, problems, claimFindings };
+    },
+
     buildPromptSection() {
       const beats = this.sixBeatContract
         .map((item) => `  - ${item.beat} (${item.window}): ${item.role}`)

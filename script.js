@@ -84,6 +84,7 @@ const timelineZoomInBtn = document.getElementById("timelineZoomIn");
 const timelineZoomOutBtn = document.getElementById("timelineZoomOut");
 const timelinePlayButton = document.getElementById("timelinePlayButton");
 const listViewButton = document.getElementById("listViewButton");
+const beatLaneButton = document.getElementById("beatLaneButton");
 const mobileMenuButton = document.getElementById("mobileMenuButton");
 const mobileDrawer = document.getElementById("mobileDrawer");
 const mobileDrawerSaveLabel = document.getElementById("mobileDrawerSaveLabel");
@@ -145,6 +146,7 @@ let isPlaying = false;
 let playheadRafId = null;
 let lastPlayTimestamp = null;
 let isListMode = false;
+let isBeatLaneMode = false;
 let isDrawerOpen = false;
 let expandedPanelIds = new Set();
 
@@ -178,6 +180,10 @@ if (MOBILE_HOME_MEDIA_QUERY.matches) {
 
 listViewButton?.addEventListener("click", () => {
   if (isListMode) disableListMode(); else enableListMode();
+});
+
+beatLaneButton?.addEventListener("click", () => {
+  if (isBeatLaneMode) disableBeatLaneMode(); else enableBeatLaneMode();
 });
 
 MOBILE_HOME_MEDIA_QUERY.addEventListener("change", (e) => {
@@ -974,7 +980,8 @@ function loadViewState() {
     return {
       zoom: Number.isFinite(parsed.zoom) ? parsed.zoom : 1,
       scrollLeft: Number.isFinite(parsed.scrollLeft) ? parsed.scrollLeft : 0,
-      scrollTop: Number.isFinite(parsed.scrollTop) ? parsed.scrollTop : 0
+      scrollTop: Number.isFinite(parsed.scrollTop) ? parsed.scrollTop : 0,
+      beatLaneMode: parsed.beatLaneMode === true
     };
   } catch {
     return {};
@@ -982,12 +989,16 @@ function loadViewState() {
 }
 
 function persistViewState() {
+  // In beat-lane mode the viewport scroll tracks the lanes, not the canvas, so
+  // keep the previously stored canvas scroll instead of clobbering it.
+  const prev = isBeatLaneMode ? loadViewState() : null;
   window.localStorage.setItem(
     VIEW_STORAGE_KEY,
     JSON.stringify({
       zoom,
-      scrollLeft: canvasViewport.scrollLeft,
-      scrollTop: canvasViewport.scrollTop
+      scrollLeft: prev ? (prev.scrollLeft ?? 0) : canvasViewport.scrollLeft,
+      scrollTop: prev ? (prev.scrollTop ?? 0) : canvasViewport.scrollTop,
+      beatLaneMode: isBeatLaneMode
     })
   );
 }
@@ -1174,6 +1185,13 @@ function renderPanels(options = {}) {
     panelCount.textContent = String(panels.length);
   }
 
+  if (isBeatLaneMode) {
+    renderBeatLanes();
+    syncSelectionUI();
+    scheduleCanvasMetricsUpdate(Boolean(options.restoreView));
+    return;
+  }
+
   const orderedPanels = isListMode
     ? [...panels].sort((a, b) => a.y - b.y || a.x - b.x)
     : panels;
@@ -1185,6 +1203,155 @@ function renderPanels(options = {}) {
   if (isListMode) applyCompactCards();
   syncSelectionUI();
   scheduleCanvasMetricsUpdate(Boolean(options.restoreView));
+}
+
+// Beat-lane layout: groups every card into one swimlane per six-beat contract
+// step (hook → cta), plus a trailing "미지정" lane for unassigned cuts. Beat
+// order/labels/colors come from window.ShonodeBeatMeta (set by shotboard-ai.js)
+// so there is a single source of truth. Cards keep their beat via panel.beat;
+// their absolute x/y are neutralized by CSS in beat-lane mode, so we do not
+// mutate positions — toggling back to canvas restores the hand-placed layout.
+function renderBeatLanes() {
+  const beatMeta = (typeof window !== "undefined" && window.ShonodeBeatMeta) || { order: [], meta: {} };
+  const order = Array.isArray(beatMeta.order) ? beatMeta.order : [];
+  const meta = beatMeta.meta || {};
+
+  const buckets = new Map();
+  order.forEach((beat) => buckets.set(beat, []));
+  const unassigned = [];
+  panels.forEach((panel) => {
+    if (buckets.has(panel.beat)) {
+      buckets.get(panel.beat).push(panel);
+    } else {
+      unassigned.push(panel);
+    }
+  });
+
+  const lanes = order.map((beat) => ({
+    id: beat,
+    label: meta[beat]?.label ?? beat,
+    color: meta[beat]?.color ?? "#94a3b8",
+    items: buckets.get(beat)
+  }));
+  if (unassigned.length > 0) {
+    lanes.push({ id: "", label: "미지정", color: "#94a3b8", items: unassigned });
+  }
+
+  lanes.forEach((lane) => {
+    const laneEl = document.createElement("div");
+    laneEl.className = "beat-lane";
+    laneEl.dataset.beat = lane.id;
+
+    // Contract status, mirroring the beat-coverage panel: a real beat with no
+    // cuts is "missing"; the CTA lane must hold exactly one cut; the trailing
+    // "미지정" lane is flagged as unassigned.
+    let contract = "ok";
+    let flagText = "";
+    if (lane.id === "") {
+      contract = "unassigned";
+    } else if (lane.items.length === 0) {
+      contract = "missing";
+      flagText = "빠진 비트";
+    } else if (lane.id === "cta" && lane.items.length !== 1) {
+      contract = "warn";
+      flagText = "CTA는 1개";
+    }
+    laneEl.dataset.contract = contract;
+
+    const header = document.createElement("div");
+    header.className = "beat-lane-header";
+    header.style.setProperty("--lane-color", lane.color);
+
+    const dot = document.createElement("span");
+    dot.className = "beat-lane-dot";
+    const label = document.createElement("span");
+    label.className = "beat-lane-label";
+    label.textContent = lane.label;
+    const count = document.createElement("span");
+    count.className = "beat-lane-count";
+    count.textContent = String(lane.items.length);
+    header.append(dot, label, count);
+    if (flagText) {
+      const flag = document.createElement("span");
+      flag.className = "beat-lane-flag";
+      flag.textContent = flagText;
+      header.append(flag);
+    }
+
+    const track = document.createElement("div");
+    track.className = "beat-lane-track";
+    if (lane.items.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "beat-lane-empty";
+      empty.textContent = "이 비트의 컷이 아직 없습니다";
+      track.appendChild(empty);
+    } else {
+      lane.items.forEach((panel) => {
+        const index = panels.indexOf(panel);
+        // createPanelElement may return a DocumentFragment (AI override) — grab
+        // the real .story-card element so the drag source binds to a node with
+        // a classList, not the fragment.
+        const produced = createPanelElement(panel, index);
+        const cardEl = produced.nodeType === Node.DOCUMENT_FRAGMENT_NODE
+          ? produced.querySelector(".story-card")
+          : produced;
+        track.appendChild(produced);
+        if (cardEl) {
+          attachBeatLaneDragSource(cardEl, panel.id);
+        }
+      });
+    }
+
+    // Each lane is a drop target: dropping a card reassigns its beat (only the
+    // beat — never x/y), pushes history, and re-renders so the card jumps lanes.
+    attachBeatLaneDropTarget(laneEl, track, lane);
+
+    laneEl.append(header, track);
+    board.appendChild(laneEl);
+  });
+}
+
+// Make a lane card draggable by its header handle (leaves the caption textarea
+// editable). Uses native HTML5 drag-and-drop, carrying the panel id.
+function attachBeatLaneDragSource(cardEl, panelId) {
+  const handle = cardEl.querySelector(".panel-handle") || cardEl.querySelector(".card-header");
+  if (!handle) return;
+  handle.setAttribute("draggable", "true");
+  handle.setAttribute("title", "드래그해 다른 비트 레인으로 이동");
+  handle.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData("text/plain", panelId);
+    event.dataTransfer.effectAllowed = "move";
+    cardEl.classList.add("is-lane-dragging");
+  });
+  handle.addEventListener("dragend", () => {
+    cardEl.classList.remove("is-lane-dragging");
+  });
+}
+
+// Wire a lane as a drop target that reassigns the dropped card's beat.
+function attachBeatLaneDropTarget(laneEl, track, lane) {
+  track.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    laneEl.classList.add("is-drop-target");
+  });
+  track.addEventListener("dragleave", (event) => {
+    if (!track.contains(event.relatedTarget)) {
+      laneEl.classList.remove("is-drop-target");
+    }
+  });
+  track.addEventListener("drop", (event) => {
+    event.preventDefault();
+    laneEl.classList.remove("is-drop-target");
+    const panelId = event.dataTransfer.getData("text/plain");
+    const panel = panelId ? getPanelById(panelId) : null;
+    if (!panel || panel.beat === lane.id) {
+      return;
+    }
+    pushHistoryState();
+    updatePanel(panelId, { beat: lane.id }, { announce: false });
+    setStatus(`컷을 ${lane.label} 비트로 옮겼습니다.`);
+  });
 }
 
 function isConfirmDialogOpen() {
@@ -1574,7 +1741,7 @@ function createPanelElement(panel, index) {
 }
 
 function startCardDrag(event, panelId) {
-  if (isListMode) return;
+  if (isListMode || isBeatLaneMode) return;
   const dragIds =
     selectedPanelIds.size > 1 && selectedPanelIds.has(panelId)
       ? Array.from(selectedPanelIds)
@@ -2305,6 +2472,10 @@ function elevatePanels(panelIds) {
 }
 
 function nudgeSelection(fallbackPanelId, deltaX, deltaY) {
+  // Beat-lane mode lays cards out by CSS; nudging x/y would silently corrupt the
+  // stored canvas positions while nothing moves on screen.
+  if (isBeatLaneMode) return;
+
   const ids =
     selectedPanelIds.size > 0 && selectedPanelIds.has(fallbackPanelId)
       ? Array.from(selectedPanelIds)
@@ -2487,6 +2658,7 @@ function syncDrawerSaveLabel() {
 // ── List Mode ─────────────────────────────────────────────────────────────────
 
 function enableListMode(animate = true) {
+  clearBeatLaneMode();
   isListMode = true;
   document.body.classList.add("is-list-mode");
   if (listViewButton) {
@@ -2511,6 +2683,92 @@ function disableListMode() {
   }
   renderPanels();
   setStatus("캔버스 뷰로 전환했습니다.");
+}
+
+// ── Beat Lane Mode ────────────────────────────────────────────────────────────
+// A third, mutually-exclusive board layout (canvas / list / beat-lane) that
+// arranges cards into six-beat swimlanes. Purely visual — it never mutates panel
+// positions or history — but the toggle IS persisted in view state so it survives
+// reloads and workspace snapshots.
+
+function syncBeatLaneButton() {
+  if (!beatLaneButton) return;
+  beatLaneButton.setAttribute("aria-pressed", isBeatLaneMode ? "true" : "false");
+}
+
+// Reset beat-lane state WITHOUT re-rendering (callers render themselves).
+function clearBeatLaneMode() {
+  if (!isBeatLaneMode) return;
+  isBeatLaneMode = false;
+  document.body.classList.remove("is-beat-lane-mode");
+  syncBeatLaneButton();
+}
+
+// Set the beat-lane flag + body class WITHOUT rendering, so a following
+// renderPanels() paints the right layout in one pass. Used to restore a persisted
+// mode on load / workspace switch. Mobile forces list mode, so never enable there.
+function primeBeatLaneMode(shouldEnable) {
+  const enable = shouldEnable === true && !MOBILE_HOME_MEDIA_QUERY.matches;
+  if (enable && isListMode) {
+    isListMode = false;
+    document.body.classList.remove("is-list-mode");
+    if (listViewButton) {
+      listViewButton.setAttribute("aria-pressed", "false");
+      listViewButton.querySelector(".view-toggle-label").textContent = "리스트";
+    }
+  }
+  isBeatLaneMode = enable;
+  document.body.classList.toggle("is-beat-lane-mode", enable);
+  syncBeatLaneButton();
+}
+
+function enableBeatLaneMode(animate = true) {
+  // Silently drop list mode (mutually exclusive) — we re-render once below.
+  if (isListMode) {
+    isListMode = false;
+    expandedPanelIds.clear();
+    document.body.classList.remove("is-list-mode");
+    if (listViewButton) {
+      listViewButton.setAttribute("aria-pressed", "false");
+      listViewButton.querySelector(".view-toggle-label").textContent = "리스트";
+    }
+  }
+  isBeatLaneMode = true;
+  document.body.classList.add("is-beat-lane-mode");
+  syncBeatLaneButton();
+  renderPanels();
+  persistViewState();
+  if (animate) setStatus("비트 레인 뷰로 전환했습니다.");
+}
+
+function disableBeatLaneMode(animate = true) {
+  isBeatLaneMode = false;
+  document.body.classList.remove("is-beat-lane-mode");
+  syncBeatLaneButton();
+  renderPanels();
+  persistViewState();
+  if (animate) setStatus("캔버스 뷰로 전환했습니다.");
+}
+
+// Coverage panel → lane navigation: enter beat-lane mode (if needed), then scroll
+// the requested beat's lane into view and flash it. Called from the beat-coverage
+// chips in shotboard-ai.js.
+function focusBeatLane(beat) {
+  const wasActive = isBeatLaneMode;
+  if (!isBeatLaneMode) {
+    enableBeatLaneMode();
+  }
+  const selector = `.beat-lane[data-beat="${(window.CSS && CSS.escape) ? CSS.escape(beat ?? "") : (beat ?? "")}"]`;
+  const lane = board.querySelector(selector);
+  if (!lane) {
+    return;
+  }
+  lane.scrollIntoView({ behavior: wasActive ? "smooth" : "auto", block: "nearest" });
+  lane.classList.remove("is-flash");
+  void lane.offsetWidth; // restart the animation if the same lane is clicked again
+  lane.classList.add("is-flash");
+  const meta = window.ShonodeBeatMeta?.meta?.[beat];
+  if (meta) setStatus(`${meta.label} 레인으로 이동했습니다.`);
 }
 
 function applyCompactCards() {

@@ -388,6 +388,8 @@ const shonodeAiClient = {
 
   buildPrompt(payload) {
     const brief = payload?.brief?.trim() || "";
+    const qcDirective = typeof payload?.qcDirective === "string" ? payload.qcDirective.trim() : "";
+    const patternDirective = typeof payload?.patternDirective === "string" ? payload.patternDirective.trim() : "";
     const project = payload?.project || {};
     const existingCount = Number(payload?.existingPanelCount) || 0;
     const referenceImageCount = Number(payload?.referenceImageCount) || 0;
@@ -442,6 +444,8 @@ const shonodeAiClient = {
         "Uploaded attached images (0-based index order, same order as the attached images):",
         referenceCatalog,
         "",
+        qcDirective ? `QC gate ruling (obey before writing any claim): ${qcDirective}` : "",
+        patternDirective ? `Creative pattern directive (keep regenerated cuts on this grammar): ${patternDirective}` : "",
         "Original user brief:",
         brief,
         "",
@@ -497,6 +501,8 @@ const shonodeAiClient = {
       "Uploaded attached images (0-based index order, same order as the attached images):",
       referenceCatalog,
       "",
+      qcDirective ? `QC gate ruling (obey before writing any claim): ${qcDirective}` : "",
+      patternDirective ? `Creative pattern directive (build the storyboard on this grammar): ${patternDirective}` : "",
       "User brief:",
       brief
     ].join("\n");

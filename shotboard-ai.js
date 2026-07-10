@@ -26,6 +26,12 @@
     joy: { label: "환희", color: "#22C55E" },
     cta: { label: "전환(CTA)", color: "#EF4444" }
   };
+  // Expose the six-beat metadata (canonical order + Korean label + color) as a
+  // read-only global so the base canvas engine (script.js) can render beat lanes
+  // from the SAME source of truth without duplicating the beat list.
+  if (typeof window !== "undefined") {
+    window.ShonodeBeatMeta = { order: PANEL_BEATS.slice(), meta: BEAT_META };
+  }
   const PATTERN_SOURCE_FAMILIES = ["award", "dolphiners", "hybrid"];
   const CLAIM_RISK_LEVELS = ["low", "proof_required", "high"];
   const CLAIM_RULINGS = ["allowed", "claim_safe_rewrite", "blocked"];
@@ -62,6 +68,11 @@
   const aiSummaryOutputEl = document.getElementById("aiSummaryOutput");
   const aiSequenceOutputEl = document.getElementById("aiSequenceOutput");
   const beatCoverageOutputEl = document.getElementById("beatCoverageOutput");
+  const productCategoryInputEl = document.getElementById("productCategoryInput");
+  const hasProofAssetsInputEl = document.getElementById("hasProofAssetsInput");
+  const qcRiskBadgeEl = document.getElementById("qcRiskBadge");
+  const creativePatternInputEl = document.getElementById("creativePatternInput");
+  const patternRecommendOutputEl = document.getElementById("patternRecommendOutput");
   const selectionDetailOutputEl = document.getElementById("selectionDetailOutput");
   const generatePlanButtonEl = document.getElementById("generatePlanButton");
   const generatePlanButtonLabelEl = document.getElementById("generatePlanButtonLabel");
@@ -147,6 +158,8 @@
       aiSummary: "",
       previewVideoUrl: "",
       previewPosterUrl: "",
+      productCategory: "",
+      hasProofAssets: false,
       pattern: null,
       claimLog: []
     };
@@ -162,10 +175,26 @@
       aiSummary: typeof candidate?.aiSummary === "string" ? candidate.aiSummary : "",
       previewVideoUrl: typeof candidate?.previewVideoUrl === "string" ? candidate.previewVideoUrl : "",
       previewPosterUrl: typeof candidate?.previewPosterUrl === "string" ? candidate.previewPosterUrl : "",
+      productCategory: sanitizeProductCategory(candidate?.productCategory),
+      hasProofAssets: candidate?.hasProofAssets === true,
       pattern: sanitizeProjectPattern(candidate?.pattern),
       claimLog: sanitizeClaimLog(candidate?.claimLog)
     };
   };
+
+  function sanitizeProductCategory(candidate) {
+    if (typeof candidate !== "string" || !candidate) {
+      return "";
+    }
+    const pack = typeof window !== "undefined" ? window.ShonodeAdPack : null;
+    const categories = Array.isArray(pack?.productRiskCategories) ? pack.productRiskCategories : null;
+    // If the pack (taxonomy) can't be consulted — e.g. its script failed to load —
+    // preserve the stored string by type instead of wiping saved user data.
+    if (!categories) {
+      return candidate;
+    }
+    return categories.some((cat) => cat.id === candidate) ? candidate : "";
+  }
 
   function sanitizeProjectPattern(candidate) {
     if (!candidate || typeof candidate !== "object") {
@@ -210,6 +239,8 @@
       aiSummary: projectValue.aiSummary ?? "",
       previewVideoUrl: projectValue.previewVideoUrl ?? "",
       previewPosterUrl: projectValue.previewPosterUrl ?? "",
+      productCategory: sanitizeProductCategory(projectValue.productCategory),
+      hasProofAssets: projectValue.hasProofAssets === true,
       pattern: projectValue.pattern ? { ...projectValue.pattern } : null,
       claimLog: Array.isArray(projectValue.claimLog) ? projectValue.claimLog.map((entry) => ({ ...entry })) : []
     };
@@ -300,11 +331,26 @@
     if (aiReferenceWeightInputEl) {
       aiReferenceWeightInputEl.value = sanitizeReferenceWeight(project.referenceWeight);
     }
+    if (productCategoryInputEl) {
+      productCategoryInputEl.value = project.productCategory ?? "";
+    }
+    if (hasProofAssetsInputEl) {
+      hasProofAssetsInputEl.checked = project.hasProofAssets === true;
+    }
+    if (creativePatternInputEl) {
+      const patternId = project.pattern?.id ?? "";
+      const hasOption = Array.from(creativePatternInputEl.options).some((opt) => opt.value === patternId);
+      // Unknown/legacy ids (or pack absent) fall back to the auto option instead
+      // of a blank select (selectedIndex -1); project.pattern itself is kept.
+      creativePatternInputEl.value = hasOption ? patternId : "";
+    }
     renderWorkspaceLibrary();
     renderAiReferenceImages();
     renderAiOutputs();
     renderPreviewSidebar();
     renderBeatCoverage();
+    renderQcRiskBadge();
+    renderPatternRecommendations();
   };
 
   persistProject = function overridePersistProject(...args) {
@@ -716,6 +762,61 @@
   bindProjectField(previewVideoUrlInputEl, "previewVideoUrl");
   bindProjectField(previewPosterUrlInputEl, "previewPosterUrl");
 
+  // qc_gate intake wiring: keep the risk badge live as the operator edits the
+  // brief, picks a product category, or toggles proof availability.
+  populateProductCategorySelect();
+  populateCreativePatternSelect();
+  aiBriefInputEl.addEventListener("input", () => {
+    renderQcRiskBadge();
+    renderPatternRecommendations();
+  });
+  // Discrete edits: snapshot first so each is its own undo step. These fields ride
+  // in every history snapshot (cloneProject), so without this an unrelated undo
+  // would silently revert the category / proof selection.
+  productCategoryInputEl?.addEventListener("change", () => {
+    pushHistoryState();
+    updateProject({ productCategory: sanitizeProductCategory(productCategoryInputEl.value) }, { announce: false });
+    renderQcRiskBadge();
+    renderPatternRecommendations();
+  });
+  hasProofAssetsInputEl?.addEventListener("change", () => {
+    pushHistoryState();
+    updateProject({ hasProofAssets: hasProofAssetsInputEl.checked }, { announce: false });
+    renderQcRiskBadge();
+    renderPatternRecommendations();
+  });
+  creativePatternInputEl?.addEventListener("change", () => {
+    pushHistoryState();
+    updateProject({ pattern: buildPatternFromId(creativePatternInputEl.value) }, { announce: false });
+    renderPatternRecommendations();
+  });
+  patternRecommendOutputEl?.addEventListener("click", (event) => {
+    const chip = event.target.closest(".pattern-recommend__chip");
+    if (!chip) {
+      return;
+    }
+    const patternId = chip.dataset.patternId || "";
+    const next = project.pattern?.id === patternId ? null : buildPatternFromId(patternId);
+    pushHistoryState();
+    updateProject({ pattern: next }, { announce: false });
+    if (creativePatternInputEl) {
+      creativePatternInputEl.value = next?.id ?? "";
+    }
+    renderPatternRecommendations();
+  });
+
+  // Coverage panel ↔ beat lane: clicking a coverage chip jumps into beat-lane
+  // view and focuses that beat's lane.
+  beatCoverageOutputEl?.addEventListener("click", (event) => {
+    const chip = event.target.closest(".beat-coverage-chip");
+    if (!chip || !beatCoverageOutputEl.contains(chip)) {
+      return;
+    }
+    if (typeof focusBeatLane === "function") {
+      focusBeatLane(chip.dataset.beat || "");
+    }
+  });
+
   generatePlanButtonEl.addEventListener("click", handleGeneratePlan);
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
   importWorkspaceInputEl?.addEventListener("change", handleImportWorkspaceInputChange);
@@ -891,11 +992,20 @@
   };
 
   document.body.classList.remove("is-sidebar-collapsed", "is-preview-collapsed");
-  project = normalizeProject(project);
+  // Re-read the project from storage now that the rich normalizeProject override
+  // is installed. At boot script.js ran the BASE normalizeProject, which rebuilds
+  // the object from base fields only — stripping aiBrief, pattern,
+  // productCategory, hasProofAssets, and claimLog from the in-memory copy.
+  // (Panels survive boot because base normalizePanel spreads `...source`.)
+  project = loadProject();
   panels = panels.map((panel, index) => normalizePanel(panel, index));
   renderProjectSidebar();
   applySidebarRailState(false);
   syncConnectionLayer();
+  // Restore a persisted beat-lane view (from the last session) before rendering.
+  if (typeof primeBeatLaneMode === "function") {
+    primeBeatLaneMode(typeof savedView !== "undefined" && savedView?.beatLaneMode === true);
+  }
   renderPanels({ restoreView: true });
   initializeWorkspaceLibrary();
 
@@ -1101,7 +1211,8 @@
       view: {
         zoom: 1,
         scrollLeft: 0,
-        scrollTop: 0
+        scrollTop: 0,
+        beatLaneMode: false
       },
       sidebar: {
         leftSections: ["project"],
@@ -2582,6 +2693,56 @@
     connectionLayerEl.setAttribute("viewBox", `0 0 ${canvasWidth} ${canvasHeight}`);
   }
 
+  // Shared by full generation AND selected-cut regeneration so both flows honour
+  // the same qc_gate ruling and creative-pattern grammar.
+  // - qcDirective: claim-safe ruling as a SEPARATE field (never mutates the brief,
+  //   so the local fallback's brief parsing stays clean).
+  // - patternDirective: the chosen creative pattern's grammar + risk control.
+  function buildGenerationDirectives(brief) {
+    const pack = window.ShonodeAdPack;
+    const qcRisk = pack && typeof pack.classifyProductRisk === "function"
+      ? pack.classifyProductRisk({
+          categoryId: project.productCategory,
+          hasProof: project.hasProofAssets === true,
+          brief
+        })
+      : null;
+    const qcDirective = qcRisk && pack && typeof pack.buildQcDirective === "function"
+      ? pack.buildQcDirective(qcRisk)
+      : "";
+    const patternDirective = project.pattern && pack && typeof pack.buildPatternDirective === "function"
+      ? pack.buildPatternDirective(project.pattern, { hasProof: project.hasProofAssets === true })
+      : "";
+    return { qcRisk, qcDirective, patternDirective };
+  }
+
+  // final_output_contract — validate the current board against the six-beat
+  // contract + claim-safety rules (non-LLM). Pure compute; callers decide
+  // whether to store claimFindings into project.claimLog.
+  function buildOutputContractReport() {
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.validateOutputContract !== "function") {
+      return null;
+    }
+    const cuts = panels.map((panel) => ({
+      panelId: panel.id,
+      beat: panel.beat,
+      caption: panel.caption || "",
+      promptText: [panel.t2iPrompt, panel.i2vStartPrompt, panel.i2vMotionPrompt, panel.i2vEndPrompt]
+        .filter(Boolean)
+        .join(" ")
+    }));
+    const hasProof = project.hasProofAssets === true;
+    const risk = typeof pack.classifyProductRisk === "function"
+      ? pack.classifyProductRisk({
+          categoryId: project.productCategory,
+          hasProof,
+          brief: project.aiBrief || ""
+        })
+      : null;
+    return pack.validateOutputContract({ cuts, risk, hasProof });
+  }
+
   async function handleGeneratePlan() {
     const brief = project.aiBrief?.trim();
     if (!brief) {
@@ -2595,9 +2756,14 @@
     setStatus("브리프를 분석해 컷 초안을 생성하고 있습니다.");
 
     try {
+      const { qcRisk, qcDirective, patternDirective } = buildGenerationDirectives(brief);
+
       const payload = {
         brief,
         project: cloneProject(),
+        qcRisk,
+        qcDirective,
+        patternDirective,
         existingPanelCount: panels.length,
         referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),
         referenceImageCount: aiReferenceImages.length,
@@ -2784,8 +2950,8 @@
     const chips = PANEL_BEATS.map((beat) => {
       const present = counts[beat] > 0;
       const meta = BEAT_META[beat];
-      return `<span class="beat-coverage-chip" data-present="${present}" style="background:${meta.color}">`
-        + `${escapeHtml(meta.label)}<span class="beat-coverage-count">${counts[beat]}</span></span>`;
+      return `<button type="button" class="beat-coverage-chip" data-beat="${beat}" data-present="${present}" style="background:${meta.color}" title="${escapeHtml(meta.label)} 레인으로 이동">`
+        + `${escapeHtml(meta.label)}<span class="beat-coverage-count">${counts[beat]}</span></button>`;
     }).join("");
 
     const missing = PANEL_BEATS.filter((beat) => counts[beat] === 0);
@@ -2805,6 +2971,129 @@
       : `<ul class="beat-coverage-status beat-coverage-status--warn">${problems.map((problem) => `<li>${escapeHtml(problem)}</li>`).join("")}</ul>`;
 
     beatCoverageOutputEl.innerHTML = `<div class="beat-coverage-chips">${chips}</div>${status}`;
+  }
+
+  // qc_gate intake — fill the "제품 카테고리" select from the pack taxonomy so the
+  // option ids/labels never drift from the classifier.
+  function populateProductCategorySelect() {
+    if (!productCategoryInputEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    const categories = Array.isArray(pack?.productRiskCategories) ? pack.productRiskCategories : [];
+    const options = [`<option value="">카테고리 선택 (선택)</option>`]
+      .concat(categories.map((cat) =>
+        `<option value="${escapeHtml(cat.id)}">${escapeHtml(cat.label)}</option>`
+      ))
+      .join("");
+    productCategoryInputEl.innerHTML = options;
+  }
+
+  // Runs the client-side qc_gate classifier and paints the risk badge next to the
+  // brief. Cheap enough to call on every brief keystroke and sidebar render.
+  function renderQcRiskBadge() {
+    if (!qcRiskBadgeEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.classifyProductRisk !== "function") {
+      qcRiskBadgeEl.hidden = true;
+      return;
+    }
+
+    const result = pack.classifyProductRisk({
+      categoryId: project.productCategory,
+      hasProof: project.hasProofAssets === true,
+      brief: project.aiBrief || ""
+    });
+
+    qcRiskBadgeEl.hidden = false;
+    qcRiskBadgeEl.dataset.risk = result.level;
+
+    const parts = [];
+    parts.push(`<span class="qc-risk-badge__pill">${escapeHtml(result.headline)}</span>`);
+    if (result.detected && result.categoryLabel) {
+      parts.push(`<span class="qc-risk-badge__tag">브리프에서 감지: ${escapeHtml(result.categoryLabel)}</span>`);
+    }
+    if (result.matchedKeywords.length > 0) {
+      parts.push(`<span class="qc-risk-badge__tag qc-risk-badge__tag--muted">${result.matchedKeywords.map(escapeHtml).join(" · ")}</span>`);
+    }
+
+    qcRiskBadgeEl.innerHTML =
+      `<div class="qc-risk-badge__row">${parts.join("")}</div>`
+      + `<p class="qc-risk-badge__detail">${escapeHtml(result.detail)}</p>`;
+  }
+
+  // pattern_selection — fill the "크리에이티브 패턴" select from the pack matrix
+  // so option ids/labels never drift from the recommendation heuristic.
+  function populateCreativePatternSelect() {
+    if (!creativePatternInputEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    const patterns = Array.isArray(pack?.creativePatterns) ? pack.creativePatterns : [];
+    const options = [`<option value="">자동 — AI가 브리프에 맞게 선택</option>`]
+      .concat(patterns.map((p) =>
+        `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)} · ${escapeHtml(p.when)}</option>`
+      ))
+      .join("");
+    creativePatternInputEl.innerHTML = options;
+  }
+
+  function buildPatternFromId(patternId) {
+    const pack = window.ShonodeAdPack;
+    const meta = Array.isArray(pack?.creativePatterns)
+      ? pack.creativePatterns.find((p) => p.id === patternId)
+      : null;
+    if (!meta) {
+      return null;
+    }
+    return { id: meta.id, name: meta.label, sourceFamily: meta.sourceFamily };
+  }
+
+  // Kernel-matrix recommendations for the current intake, rendered as clickable
+  // chips. Also warns when proof_experiment is chosen without proof assets.
+  function renderPatternRecommendations() {
+    if (!patternRecommendOutputEl) {
+      return;
+    }
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.recommendPatterns !== "function") {
+      patternRecommendOutputEl.hidden = true;
+      return;
+    }
+
+    const brief = (project.aiBrief || "").trim();
+    if (!brief) {
+      patternRecommendOutputEl.hidden = true;
+      return;
+    }
+
+    const input = {
+      categoryId: project.productCategory,
+      hasProof: project.hasProofAssets === true,
+      brief
+    };
+    const recommendations = pack.recommendPatterns(input);
+    const selectedId = project.pattern?.id || "";
+
+    const chips = recommendations.map((p) =>
+      `<button type="button" class="pattern-recommend__chip" data-pattern-id="${escapeHtml(p.id)}"`
+      + ` data-selected="${p.id === selectedId}" title="${escapeHtml(p.when)} — ${escapeHtml(p.risk)}">`
+      + `${escapeHtml(p.label)}</button>`
+    ).join("");
+
+    let warning = "";
+    const selectedMeta = Array.isArray(pack.creativePatterns)
+      ? pack.creativePatterns.find((p) => p.id === selectedId)
+      : null;
+    if (selectedMeta?.requiresProof && !input.hasProof) {
+      warning = `<p class="pattern-recommend__warning">증빙 없이 ${escapeHtml(selectedMeta.label)} 패턴은 권장되지 않습니다 — 증거 날조 금지 규칙이 적용됩니다.</p>`;
+    }
+
+    patternRecommendOutputEl.hidden = false;
+    patternRecommendOutputEl.innerHTML =
+      `<span class="pattern-recommend__label">추천</span>${chips}${warning}`;
   }
 
   function renderSelectionDetail() {
@@ -3484,8 +3773,12 @@
       view: {
         zoom,
         scrollLeft: canvasViewport.scrollLeft,
-        scrollTop: canvasViewport.scrollTop
+        scrollTop: canvasViewport.scrollTop,
+        beatLaneMode: isBeatLaneMode === true
       },
+      // final_output_contract report — advisory snapshot of contract compliance
+      // at save time (import ignores it; recomputed on the next export).
+      contract: buildOutputContractReport(),
       sidebar: {
         leftSections: [...activeLeftSidebarSections],
         rightSections: [...activeRightSidebarSections],
@@ -3507,6 +3800,15 @@
   async function handleExportWorkspace() {
     await window.ShonodePanelImageStorage?.ready?.();
     await window.ShonodePanelImageStorage?.flush?.();
+
+    // final_output_contract — validate before export and record claim findings
+    // into project.claimLog so the exported file carries the audit trail.
+    // Derived data: no history snapshot (recomputed on every export).
+    const contract = buildOutputContractReport();
+    if (contract) {
+      updateProject({ claimLog: contract.claimFindings }, { announce: false });
+    }
+
     const snapshot = createWorkspaceExportSnapshot();
     const fileName = `${sanitizeWorkspaceFileName(project.title)}-${new Date().toISOString().slice(0, 10)}.shonode`;
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/x-shonode+json" });
@@ -3518,7 +3820,14 @@
     downloadLink.click();
     downloadLink.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    setStatus("프로젝트를 내보냈습니다.");
+
+    if (contract && !contract.pass) {
+      setStatus(`프로젝트를 내보냈습니다 — 계약 경고 ${contract.problems.length}건: ${contract.problems[0]}`, "warning");
+    } else if (contract && contract.claimFindings.length > 0) {
+      setStatus(`프로젝트를 내보냈습니다 — 클레임 표현 ${contract.claimFindings.length}건이 claimLog에 기록되었습니다.`);
+    } else {
+      setStatus("프로젝트를 내보냈습니다 — 6비트 계약 충족.");
+    }
   }
 
   async function handleImportWorkspaceInputChange(event) {
@@ -3615,6 +3924,9 @@
     renderProjectSidebar();
     applySidebarRailState(false);
     updateHistoryUI();
+    if (typeof primeBeatLaneMode === "function") {
+      primeBeatLaneMode(viewSnapshot.beatLaneMode === true);
+    }
     renderPanels({ restoreView: true });
     window.setTimeout(() => {
       persistViewState();
@@ -3847,10 +4159,14 @@
     setStatus("선택한 컷만 다시 정리하고 있습니다.");
 
     try {
+      const regenDirectives = buildGenerationDirectives(brief);
       const payload = {
         generationMode: "selected-panels",
         brief,
         project: cloneProject(),
+        qcRisk: regenDirectives.qcRisk,
+        qcDirective: regenDirectives.qcDirective,
+        patternDirective: regenDirectives.patternDirective,
         selectedPanelCount: orderedSelectedPanels.length,
         selectedPanels: buildSelectedPanelsPayload(orderedSelectedPanels),
         referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),
