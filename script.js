@@ -147,6 +147,9 @@ let playheadRafId = null;
 let lastPlayTimestamp = null;
 let isListMode = false;
 let isBeatLaneMode = false;
+// Canvas viewport scroll captured on entering beat-lane mode, restored on exit
+// (in lane mode the same viewport scrolls the lane stack instead).
+let savedCanvasScroll = null;
 let isDrawerOpen = false;
 let expandedPanelIds = new Set();
 
@@ -990,12 +993,14 @@ function loadViewState() {
 
 function persistViewState() {
   // In beat-lane mode the viewport scroll tracks the lanes, not the canvas, so
-  // keep the previously stored canvas scroll instead of clobbering it.
+  // keep the previously stored canvas scroll — and zoom — instead of
+  // clobbering them (no zoom entry point should fire in lane mode, but any
+  // that slips through must not overwrite the canvas zoom invisibly).
   const prev = isBeatLaneMode ? loadViewState() : null;
   window.localStorage.setItem(
     VIEW_STORAGE_KEY,
     JSON.stringify({
-      zoom,
+      zoom: prev && Number.isFinite(prev.zoom) ? prev.zoom : zoom,
       scrollLeft: prev ? (prev.scrollLeft ?? 0) : canvasViewport.scrollLeft,
       scrollTop: prev ? (prev.scrollTop ?? 0) : canvasViewport.scrollTop,
       beatLaneMode: isBeatLaneMode
@@ -1847,6 +1852,13 @@ function handleCardDragEnd(event) {
 }
 
 function handleViewportWheel(event) {
+  // List/lane stacks scroll natively; zoom only applies to the canvas view.
+  // Without this guard, wheel in beat-lane mode silently zooms the hidden
+  // canvas (no visual feedback) and preventDefault blocks lane scrolling.
+  if (isListMode || isBeatLaneMode) {
+    return;
+  }
+
   if (event.target.closest("textarea")) {
     return;
   }
@@ -2305,7 +2317,9 @@ function scheduleCanvasMetricsUpdate(restoreView = false) {
   metricsFrameId = window.requestAnimationFrame(() => {
     updateCanvasMetrics();
 
-    if (restoreView && pendingInitialScroll) {
+    if (restoreView && pendingInitialScroll && !isBeatLaneMode) {
+      // In beat-lane mode the viewport scrolls the lane stack — keep the saved
+      // canvas scroll pending so returning to canvas view can restore it.
       canvasViewport.scrollLeft = pendingInitialScroll.left;
       canvasViewport.scrollTop = pendingInitialScroll.top;
       pendingInitialScroll = null;
@@ -2733,6 +2747,14 @@ function enableBeatLaneMode(animate = true) {
       listViewButton.querySelector(".view-toggle-label").textContent = "리스트";
     }
   }
+  // Capture the canvas scroll while the viewport still shows the canvas, so
+  // disabling lane mode can restore it (the lane stack reuses this viewport).
+  if (!isBeatLaneMode) {
+    savedCanvasScroll = {
+      left: canvasViewport.scrollLeft,
+      top: canvasViewport.scrollTop
+    };
+  }
   isBeatLaneMode = true;
   document.body.classList.add("is-beat-lane-mode");
   syncBeatLaneButton();
@@ -2745,8 +2767,21 @@ function disableBeatLaneMode(animate = true) {
   isBeatLaneMode = false;
   document.body.classList.remove("is-beat-lane-mode");
   syncBeatLaneButton();
-  renderPanels();
-  persistViewState();
+
+  // Restore the canvas scroll captured on entry (or the stored view-state when
+  // this session started in lane mode); otherwise the viewport keeps the lane
+  // stack's residual scroll and persistViewState would clobber the saved
+  // canvas position. Persist only after the restore rAF has applied it.
+  const storedView = savedCanvasScroll ? null : loadViewState();
+  pendingInitialScroll = savedCanvasScroll || {
+    left: storedView?.scrollLeft ?? 0,
+    top: storedView?.scrollTop ?? 0
+  };
+  savedCanvasScroll = null;
+  renderPanels({ restoreView: true });
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(persistViewState);
+  });
   if (animate) setStatus("캔버스 뷰로 전환했습니다.");
 }
 
