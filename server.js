@@ -6,6 +6,7 @@ const { handleStoryboardProxy, sendJson } = require("./storyboard-proxy");
 const { handleConfigRequest } = require("./config-endpoint");
 const { handleOpenAIStoryboardProxy } = require("./openai-proxy");
 const { handleCodexStoryboardProxy, handleCodexStatusRequest } = require("./codex-proxy");
+const { handleGeminiImageProxy, handleOpenAIImageProxy } = require("./image-proxy");
 
 const ROOT_DIR = __dirname;
 
@@ -60,6 +61,18 @@ const requestHandler = async (request, response) => {
 
     if (requestUrl.pathname === "/api/codex-status") {
       await handleCodexStatusRequest(request, response);
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/image") {
+      await handleGeminiImageProxy(request, response, {
+        apiKeyHint: "Set GEMINI_API_KEY in .env or the environment."
+      });
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/image-openai") {
+      await handleOpenAIImageProxy(request, response);
       return;
     }
 

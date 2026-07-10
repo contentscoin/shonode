@@ -536,6 +536,48 @@
     card.classList.toggle("is-link-source", linkState?.sourceId === panel.id);
     card.classList.toggle("is-link-target", linkState?.targetId === panel.id);
 
+    const keyframeButton = fragment.querySelector(".keyframe-generate-button");
+    if (keyframeButton) {
+      keyframeButton.addEventListener("click", async () => {
+        const aiClient = window.ShonodeAI || window.ShotBoardAI;
+        // WYSIWYG: generate from exactly what the textarea shows (it is bound
+        // to panel.t2iPrompt on input, so no hidden fallback).
+        const prompt = t2iInput.value.trim();
+        if (!prompt) {
+          setStatus("이미지 프롬프트를 먼저 작성해주세요.", "warning");
+          return;
+        }
+        if (!aiClient?.generateKeyframe) {
+          setStatus("이미지 생성 모듈을 불러오지 못했습니다.", "warning");
+          return;
+        }
+
+        keyframeButton.disabled = true;
+        const originalLabel = keyframeButton.textContent;
+        keyframeButton.textContent = "생성 중…";
+        setStatus("키프레임을 생성하고 있습니다…");
+        try {
+          const referenceDataUrls = getPanelReferenceImages(panel)
+            .map((item) => item?.image?.dataUrl)
+            .filter((dataUrl) => typeof dataUrl === "string");
+          const dataUrl = await aiClient.generateKeyframe({ prompt, images: referenceDataUrls });
+          pushHistoryState();
+          // updatePanel rerenders the whole board, which also resets this button.
+          updatePanel(panel.id, {
+            image: dataUrl,
+            fileName: `keyframe-${index + 1}.png`,
+            viewMode: "image"
+          }, { announce: false });
+          updateHistoryUI();
+          setStatus("키프레임을 컷 이미지로 반영했습니다.");
+        } catch (error) {
+          keyframeButton.disabled = false;
+          keyframeButton.textContent = originalLabel;
+          setStatus(error?.message || "키프레임 생성에 실패했습니다.", "warning");
+        }
+      });
+    }
+
     const referenceImages = getPanelReferenceImages(panel);
     if (referenceBookmarkListEl) {
       referenceBookmarkListEl.innerHTML = "";

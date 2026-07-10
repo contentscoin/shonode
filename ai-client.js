@@ -64,6 +64,59 @@ const shonodeAiClient = {
     return `${this.baseOrigin}/api/storyboard-codex`;
   },
 
+  get imageEndpoint() {
+    return `${this.baseOrigin}/api/image`;
+  },
+
+  get openaiImageEndpoint() {
+    return `${this.baseOrigin}/api/image-openai`;
+  },
+
+  // Generates a keyframe still for one cut. Provider-aware:
+  // gemini-server supports reference images (I2I); openai-byok is prompt-only;
+  // the Codex provider does not support keyframes (callers should surface that).
+  async generateKeyframe({ prompt, images = [] }) {
+    const settings = this.getProviderSettings();
+    const cleanPrompt = typeof prompt === "string" ? prompt.trim() : "";
+    if (!cleanPrompt) {
+      throw new Error("이미지 프롬프트가 비어 있습니다.");
+    }
+
+    if (settings.provider === "codex-oauth") {
+      throw new Error("Codex 제공자는 키프레임 생성을 지원하지 않습니다. Gemini 또는 OpenAI 제공자를 선택하세요.");
+    }
+
+    const isOpenAI = settings.provider === "openai-byok";
+    if (isOpenAI && !settings.openaiKey) {
+      throw new Error("OpenAI API 키가 설정되지 않았습니다. 왼쪽 AI 패널에서 키를 입력해주세요.");
+    }
+
+    const safeImages = images
+      .filter((dataUrl) => typeof dataUrl === "string" && /^data:image\//i.test(dataUrl))
+      .slice(0, 4);
+
+    const response = await fetch(isOpenAI ? this.openaiImageEndpoint : this.imageEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(isOpenAI ? { "x-openai-key": settings.openaiKey } : {}),
+        ...this.headers
+      },
+      body: JSON.stringify(isOpenAI ? { prompt: cleanPrompt } : { prompt: cleanPrompt, images: safeImages })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`키프레임 생성 실패: ${response.status} ${errorText.slice(0, 300)}`);
+    }
+
+    const result = await response.json();
+    if (typeof result?.dataUrl !== "string" || !result.dataUrl.startsWith("data:image/")) {
+      throw new Error("이미지 응답이 비어 있습니다.");
+    }
+    return result.dataUrl;
+  },
+
   async generateStoryboard(payload) {
     const settings = this.getProviderSettings();
     if (settings.provider === "openai-byok") {

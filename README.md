@@ -101,6 +101,15 @@ npm run dev                    # Shonode 로컬 실행 후 AI 제공자에서 Co
 
 생성된 각 컷은 `beat` 라벨을 갖고 패널에 저장됩니다.
 
+## 키프레임 생성
+
+각 컷 카드의 T2I/I2I 프롬프트 패널에 있는 **"키프레임 생성"** 버튼이 해당 프롬프트로 스틸 이미지를 생성해 컷 이미지로 바로 넣습니다.
+
+- **Gemini (서버 키)**: `GEMINI_IMAGE_MODEL`(기본 `gemini-2.5-flash-image`)으로 생성하며, 컷에 연결된 레퍼런스 이미지가 있으면 I2I 참조로 함께 전달됩니다.
+- **OpenAI (내 키)**: `gpt-image-1`(1536×1024)로 생성. 프롬프트 전용.
+- Codex 제공자는 키프레임 생성을 지원하지 않습니다(안내 표시).
+- 생성 결과는 컷의 이미지로 저장되고(undo 가능) 새로고침 후에도 유지됩니다. `GEMINI_IMAGE_BASE_URL`/`OPENAI_BASE_URL`로 테스트용 업스트림을 지정할 수 있습니다.
+
 ## 클라우드 모드 (선택, Supabase)
 
 기본은 완전 로컬 동작입니다. 환경변수 두 개를 설정하면 계정 로그인 + 클라우드 프로젝트 저장이 켜집니다:
@@ -149,6 +158,8 @@ SUPABASE_ANON_KEY=your_supabase_anon_or_publishable_key
 | `/api/storyboard` | POST | Gemini 프록시 (서버 키, 요청 스키마 검증 + 오리진 정책) |
 | `/api/storyboard-openai` | POST | OpenAI 프록시 (BYO 키는 `x-openai-key` 헤더, 서버 미보관) |
 | `/api/storyboard-codex` | POST | Codex CLI 실행 (로컬 전용, 호스팅에서는 501) |
+| `/api/image` | POST | 키프레임 이미지 생성 — Gemini (서버 키, 레퍼런스 이미지 I2I 지원) |
+| `/api/image-openai` | POST | 키프레임 이미지 생성 — OpenAI `gpt-image-1` (BYO 키) |
 | `/api/config` | GET | 공개 클라이언트 설정(Supabase URL/anon key) 주입 |
 
 ## 주요 파일
