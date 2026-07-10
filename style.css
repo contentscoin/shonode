@@ -4573,3 +4573,15 @@ body.is-beat-lane-mode .caption-input {
 .beat-lane.is-flash {
   animation: beatLaneFlash 0.9s ease-out;
 }
+
+/* Keyframe generation button inside the T2I prompt panel */
+.keyframe-generate-button {
+  align-self: flex-start;
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.keyframe-generate-button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}

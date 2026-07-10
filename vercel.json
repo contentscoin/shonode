@@ -9,6 +9,8 @@
     { "src": "/api/storyboard-openai", "dest": "/api/storyboard-openai.js" },
     { "src": "/api/storyboard-codex", "dest": "/api/storyboard-codex.js" },
     { "src": "/api/codex-status", "dest": "/api/codex-status.js" },
+    { "src": "/api/image", "dest": "/api/image.js" },
+    { "src": "/api/image-openai", "dest": "/api/image-openai.js" },
     { "src": "/api/config", "dest": "/api/config.js" },
     { "handle": "filesystem" },
     { "src": "/", "dest": "/index.html" }
