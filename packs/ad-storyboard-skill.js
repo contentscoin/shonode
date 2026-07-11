@@ -395,6 +395,80 @@
         rules,
         '- Return a "beat" field for every cut using one of: hook, tension, reveal, proof, joy, cta.'
       ].join("\n");
+    },
+
+    // Step 5 handoff — turn the finished board into a MODEL-NEUTRAL video
+    // generation job spec (Kling / Runway / Seedance / Higgsfield). Reuses
+    // promptRiskRules as the global negative constraints (reference distance,
+    // no asset reuse). Pure function: takes cut digests, returns structured spec.
+    //   input.cuts: [{ sceneTitle, beat, durationLabel, hasKeyframe,
+    //                  i2vStartPrompt, i2vMotionPrompt, i2vEndPrompt }]
+    //   input.project: { title, aspectRatio, tone }
+    buildVideoJobSpec(input = {}) {
+      const cuts = Array.isArray(input.cuts) ? input.cuts : [];
+      const project = input.project || {};
+      const beatMeta = Object.fromEntries(this.sixBeatContract.map((b) => [b.beat, b]));
+      const str = (v) => (typeof v === "string" ? v.trim() : "");
+      return {
+        title: str(project.title) || "Untitled",
+        aspectRatio: str(project.aspectRatio),
+        tone: str(project.tone),
+        globalNegatives: this.promptRiskRules.slice(),
+        cuts: cuts.map((cut, i) => {
+          const beat = str(cut.beat);
+          const meta = beatMeta[beat];
+          return {
+            order: i + 1,
+            sceneTitle: str(cut.sceneTitle),
+            beat,
+            beatWindow: meta ? meta.window : "",
+            beatRole: meta ? meta.role : "",
+            duration: str(cut.durationLabel),
+            hasKeyframe: cut.hasKeyframe === true,
+            startPrompt: str(cut.i2vStartPrompt),
+            motionPrompt: str(cut.i2vMotionPrompt),
+            endPrompt: str(cut.i2vEndPrompt)
+          };
+        })
+      };
+    },
+
+    // Renders a buildVideoJobSpec result as a copy/paste-ready Markdown handoff
+    // sheet. Labeled blocks (not tables) so long prompts stay intact.
+    renderVideoJobSpecMarkdown(spec) {
+      if (!spec) {
+        return "";
+      }
+      const lines = [];
+      lines.push(`# 영상 생성 잡스펙 — ${spec.title}`);
+      lines.push("");
+      lines.push("> 모델 중립 핸드오프. 컷별 프롬프트를 Kling / Runway / Seedance / Higgsfield 등에 붙여넣으세요.");
+      lines.push("> 각 컷의 키프레임 스틸을 시작 프레임(I2V)으로 사용하세요.");
+      lines.push("");
+      if (spec.aspectRatio) lines.push(`- **화면비**: ${spec.aspectRatio}`);
+      if (spec.tone) lines.push(`- **톤**: ${spec.tone}`);
+      lines.push(`- **컷 수**: ${spec.cuts.length}`);
+      lines.push("");
+      lines.push("## 공통 네거티브 제약 (모든 컷 적용)");
+      spec.globalNegatives.forEach((n) => lines.push(`- ${n}`));
+      lines.push("");
+      spec.cuts.forEach((cut) => {
+        lines.push(`## 컷 ${cut.order}${cut.sceneTitle ? " · " + cut.sceneTitle : ""}`);
+        const badges = [];
+        if (cut.beat) badges.push(`비트 \`${cut.beat}\`${cut.beatWindow ? " (" + cut.beatWindow + ")" : ""}`);
+        if (cut.duration) badges.push(`길이 ${cut.duration}`);
+        badges.push(`키프레임 ${cut.hasKeyframe ? "있음" : "없음 — 먼저 키프레임 생성 권장"}`);
+        lines.push(badges.join(" · "));
+        if (cut.beatRole) lines.push(`_${cut.beatRole}_`);
+        lines.push("");
+        lines.push(`**Start frame**: ${cut.startPrompt || "(비어 있음)"}`);
+        lines.push("");
+        lines.push(`**Motion**: ${cut.motionPrompt || "(비어 있음)"}`);
+        lines.push("");
+        lines.push(`**End frame**: ${cut.endPrompt || "(비어 있음)"}`);
+        lines.push("");
+      });
+      return lines.join("\n");
     }
   };
 

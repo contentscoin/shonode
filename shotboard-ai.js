@@ -79,6 +79,7 @@
   const regenerateSelectionButtonEl = document.getElementById("regenerateSelectionButton");
   const importWorkspaceInputEl = document.getElementById("importWorkspaceInput");
   const exportWorkspaceButtonEl = document.getElementById("exportWorkspaceButton");
+  const exportVideoJobSpecButtonEl = document.getElementById("exportVideoJobSpecButton");
   const workspaceMainEl = document.querySelector(".workspace-main");
   const workspaceStageEl = document.querySelector(".workspace-stage");
   const workspaceOverlayEl = document.getElementById("workspaceOverlay");
@@ -861,6 +862,7 @@
 
   generatePlanButtonEl.addEventListener("click", handleGeneratePlan);
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
+  exportVideoJobSpecButtonEl?.addEventListener("click", handleExportVideoJobSpec);
   importWorkspaceInputEl?.addEventListener("change", handleImportWorkspaceInputChange);
   createWorkspaceButtonEl?.addEventListener("click", handleCreateWorkspace);
   duplicateWorkspaceButtonEl?.addEventListener("click", handleDuplicateWorkspace);
@@ -3837,6 +3839,56 @@
       .trim();
 
     return base || "shonode-workspace";
+  }
+
+  // Step 5 handoff — export a model-neutral video-generation job spec (.md)
+  // built from each cut's I2V prompts, keyframe, beat, and duration.
+  function handleExportVideoJobSpec() {
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.buildVideoJobSpec !== "function" || typeof pack.renderVideoJobSpecMarkdown !== "function") {
+      setStatus("영상 잡스펙 모듈을 불러오지 못했습니다.", "warning");
+      return;
+    }
+    if (panels.length === 0) {
+      setStatus("먼저 컷을 생성하거나 추가해 주세요.", "warning");
+      return;
+    }
+
+    const spec = pack.buildVideoJobSpec({
+      project: cloneProject(),
+      cuts: panels.map((panel) => ({
+        sceneTitle: panel.sceneTitle,
+        beat: panel.beat,
+        durationLabel: panel.durationLabel,
+        hasKeyframe: Boolean(panel.image),
+        i2vStartPrompt: panel.i2vStartPrompt,
+        i2vMotionPrompt: panel.i2vMotionPrompt,
+        i2vEndPrompt: panel.i2vEndPrompt
+      }))
+    });
+
+    const markdown = pack.renderVideoJobSpecMarkdown(spec);
+    const fileName = `${sanitizeWorkspaceFileName(project.title)}-video-jobspec.md`;
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = url;
+    downloadLink.download = fileName;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+    const missingPrompts = spec.cuts.filter((cut) => !cut.startPrompt && !cut.motionPrompt && !cut.endPrompt).length;
+    const missingKeyframes = spec.cuts.filter((cut) => !cut.hasKeyframe).length;
+    const notes = [];
+    if (missingPrompts > 0) notes.push(`I2V 프롬프트 없는 컷 ${missingPrompts}개`);
+    if (missingKeyframes > 0) notes.push(`키프레임 없는 컷 ${missingKeyframes}개`);
+    if (notes.length > 0) {
+      setStatus(`영상 잡스펙을 내보냈습니다 — ${notes.join(", ")}`, "warning");
+    } else {
+      setStatus("영상 잡스펙을 내보냈습니다 — 모든 컷 준비 완료.");
+    }
   }
 
   async function handleExportWorkspace() {

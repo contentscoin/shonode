@@ -4107,6 +4107,17 @@ body.is-list-mode .story-card:not(.is-compact) {
   border-top: 1px solid rgba(148, 163, 184, 0.28);
 }
 
+.handoff-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.handoff-export-button {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .sidebar-card-header--sub h3 {
   margin: 2px 0 0;
   font-size: 14px;
