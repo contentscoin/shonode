@@ -80,6 +80,7 @@
   const importWorkspaceInputEl = document.getElementById("importWorkspaceInput");
   const exportWorkspaceButtonEl = document.getElementById("exportWorkspaceButton");
   const exportVideoJobSpecButtonEl = document.getElementById("exportVideoJobSpecButton");
+  const exportVideoJobSpecHtmlButtonEl = document.getElementById("exportVideoJobSpecHtmlButton");
   const workspaceMainEl = document.querySelector(".workspace-main");
   const workspaceStageEl = document.querySelector(".workspace-stage");
   const workspaceOverlayEl = document.getElementById("workspaceOverlay");
@@ -863,6 +864,7 @@
   generatePlanButtonEl.addEventListener("click", handleGeneratePlan);
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
   exportVideoJobSpecButtonEl?.addEventListener("click", handleExportVideoJobSpec);
+  exportVideoJobSpecHtmlButtonEl?.addEventListener("click", handleExportVideoJobSpecHtml);
   importWorkspaceInputEl?.addEventListener("change", handleImportWorkspaceInputChange);
   createWorkspaceButtonEl?.addEventListener("click", handleCreateWorkspace);
   duplicateWorkspaceButtonEl?.addEventListener("click", handleDuplicateWorkspace);
@@ -3843,33 +3845,35 @@
 
   // Step 5 handoff — export a model-neutral video-generation job spec (.md)
   // built from each cut's I2V prompts, keyframe, beat, and duration.
-  function handleExportVideoJobSpec() {
+  // Shared by both exports: .md (prompt handoff) and .html (visual sheet with
+  // embedded keyframe stills). Returns null after surfacing a status warning.
+  function buildVideoJobSpecFromBoard() {
     const pack = window.ShonodeAdPack;
-    if (!pack || typeof pack.buildVideoJobSpec !== "function" || typeof pack.renderVideoJobSpecMarkdown !== "function") {
+    if (!pack || typeof pack.buildVideoJobSpec !== "function") {
       setStatus("영상 잡스펙 모듈을 불러오지 못했습니다.", "warning");
-      return;
+      return null;
     }
     if (panels.length === 0) {
       setStatus("먼저 컷을 생성하거나 추가해 주세요.", "warning");
-      return;
+      return null;
     }
-
-    const spec = pack.buildVideoJobSpec({
+    return pack.buildVideoJobSpec({
       project: cloneProject(),
       cuts: panels.map((panel) => ({
         sceneTitle: panel.sceneTitle,
         beat: panel.beat,
         durationLabel: panel.durationLabel,
         hasKeyframe: Boolean(panel.image),
+        keyframeDataUrl: typeof panel.image === "string" ? panel.image : "",
         i2vStartPrompt: panel.i2vStartPrompt,
         i2vMotionPrompt: panel.i2vMotionPrompt,
         i2vEndPrompt: panel.i2vEndPrompt
       }))
     });
+  }
 
-    const markdown = pack.renderVideoJobSpecMarkdown(spec);
-    const fileName = `${sanitizeWorkspaceFileName(project.title)}-video-jobspec.md`;
-    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  function downloadTextFile(content, fileName, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const downloadLink = document.createElement("a");
     downloadLink.href = url;
@@ -3878,17 +3882,76 @@
     downloadLink.click();
     downloadLink.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 
+  function announceJobSpecExport(spec, kindLabel) {
     const missingPrompts = spec.cuts.filter((cut) => !cut.startPrompt && !cut.motionPrompt && !cut.endPrompt).length;
     const missingKeyframes = spec.cuts.filter((cut) => !cut.hasKeyframe).length;
     const notes = [];
     if (missingPrompts > 0) notes.push(`I2V 프롬프트 없는 컷 ${missingPrompts}개`);
     if (missingKeyframes > 0) notes.push(`키프레임 없는 컷 ${missingKeyframes}개`);
     if (notes.length > 0) {
-      setStatus(`영상 잡스펙을 내보냈습니다 — ${notes.join(", ")}`, "warning");
+      setStatus(`${kindLabel} 내보내기 완료 — ${notes.join(", ")}`, "warning");
     } else {
-      setStatus("영상 잡스펙을 내보냈습니다 — 모든 컷 준비 완료.");
+      setStatus(`${kindLabel} 내보내기 완료 — 모든 컷 준비 완료.`);
     }
+  }
+
+  function handleExportVideoJobSpec() {
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.renderVideoJobSpecMarkdown !== "function") {
+      setStatus("영상 잡스펙 모듈을 불러오지 못했습니다.", "warning");
+      return;
+    }
+    const spec = buildVideoJobSpecFromBoard();
+    if (!spec) {
+      return;
+    }
+    downloadTextFile(
+      pack.renderVideoJobSpecMarkdown(spec),
+      `${sanitizeWorkspaceFileName(project.title)}-video-jobspec.md`,
+      "text/markdown;charset=utf-8"
+    );
+    announceJobSpecExport(spec, "영상 잡스펙");
+  }
+
+  // Visual handoff sheet: self-contained HTML with each cut's keyframe still
+  // embedded next to its I2V prompts — for client sharing and print.
+  function handleExportVideoJobSpecHtml() {
+    const pack = window.ShonodeAdPack;
+    if (!pack || typeof pack.renderVideoJobSpecHtml !== "function") {
+      setStatus("영상 잡스펙 모듈을 불러오지 못했습니다.", "warning");
+      return;
+    }
+    const spec = buildVideoJobSpecFromBoard();
+    if (!spec) {
+      return;
+    }
+    const beatColors = Object.fromEntries(
+      PANEL_BEATS.map((beat) => [beat, BEAT_META[beat]?.color || "#94a3b8"])
+    );
+    // Full-resolution data URLs can make this one very large string; guard the
+    // whole build+download so an out-of-memory/RangeError surfaces as a status
+    // warning instead of a silent dead button.
+    try {
+      downloadTextFile(
+        pack.renderVideoJobSpecHtml(spec, { beatColors }),
+        `${sanitizeWorkspaceFileName(project.title)}-video-sheet.html`,
+        "text/html;charset=utf-8"
+      );
+    } catch (error) {
+      console.warn("Visual sheet export failed.", error);
+      setStatus("비주얼 시트 생성에 실패했습니다 — 컷 이미지 용량이 너무 큽니다. 이미지 수를 줄이거나 .md 잡스펙을 사용해 주세요.", "warning");
+      return;
+    }
+    // A panel image that is not a data URL cannot be embedded (the pack blanks
+    // it); surface that instead of silently shipping a placeholder.
+    const unembeddable = spec.cuts.filter((cut) => cut.hasKeyframe && !cut.keyframeDataUrl).length;
+    if (unembeddable > 0) {
+      setStatus(`비주얼 시트 내보내기 완료 — 임베드할 수 없는 컷 이미지 ${unembeddable}개(플레이스홀더로 대체)`, "warning");
+      return;
+    }
+    announceJobSpecExport(spec, "비주얼 시트");
   }
 
   async function handleExportWorkspace() {

@@ -402,7 +402,7 @@
     // promptRiskRules as the global negative constraints (reference distance,
     // no asset reuse). Pure function: takes cut digests, returns structured spec.
     //   input.cuts: [{ sceneTitle, beat, durationLabel, hasKeyframe,
-    //                  i2vStartPrompt, i2vMotionPrompt, i2vEndPrompt }]
+    //                  keyframeDataUrl?, i2vStartPrompt, i2vMotionPrompt, i2vEndPrompt }]
     //   input.project: { title, aspectRatio, tone }
     buildVideoJobSpec(input = {}) {
       const cuts = Array.isArray(input.cuts) ? input.cuts : [];
@@ -417,6 +417,11 @@
         cuts: cuts.map((cut, i) => {
           const beat = str(cut.beat);
           const meta = beatMeta[beat];
+          // Only genuine data-URI images ride into the spec (the HTML sheet
+          // embeds them verbatim as <img src>).
+          const keyframeDataUrl = typeof cut.keyframeDataUrl === "string" && /^data:image\//i.test(cut.keyframeDataUrl)
+            ? cut.keyframeDataUrl
+            : "";
           return {
             order: i + 1,
             sceneTitle: str(cut.sceneTitle),
@@ -424,7 +429,8 @@
             beatWindow: meta ? meta.window : "",
             beatRole: meta ? meta.role : "",
             duration: str(cut.durationLabel),
-            hasKeyframe: cut.hasKeyframe === true,
+            hasKeyframe: cut.hasKeyframe === true || Boolean(keyframeDataUrl),
+            keyframeDataUrl,
             startPrompt: str(cut.i2vStartPrompt),
             motionPrompt: str(cut.i2vMotionPrompt),
             endPrompt: str(cut.i2vEndPrompt)
@@ -469,6 +475,89 @@
         lines.push("");
       });
       return lines.join("\n");
+    },
+
+    // Renders a buildVideoJobSpec result as a SELF-CONTAINED HTML visual sheet:
+    // keyframe stills embedded as data URIs next to each cut's I2V prompts, so
+    // one file serves both the client proposal and the video-generation handoff.
+    // options.beatColors: optional { beatId: cssColor } map (the app passes its
+    // BEAT_META colors so the sheet matches the canvas badges).
+    renderVideoJobSpecHtml(spec, options = {}) {
+      if (!spec) {
+        return "";
+      }
+      const esc = (value) => String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+      const beatColors = options.beatColors && typeof options.beatColors === "object" ? options.beatColors : {};
+
+      const metaBits = [];
+      if (spec.aspectRatio) metaBits.push(`화면비 ${esc(spec.aspectRatio)}`);
+      if (spec.tone) metaBits.push(`톤 ${esc(spec.tone)}`);
+      metaBits.push(`컷 ${spec.cuts.length}개`);
+
+      const negatives = spec.globalNegatives.map((n) => `<li>${esc(n)}</li>`).join("");
+
+      const cards = spec.cuts.map((cut) => {
+        // Constrain to a hex color literal — esc() alone cannot stop CSS
+        // declaration injection ("; background-image:url(...)") in style="".
+        const rawColor = beatColors[cut.beat] || "";
+        const color = /^#[0-9a-fA-F]{3,8}$/.test(rawColor) ? rawColor : "#94a3b8";
+        const beatPill = cut.beat
+          ? `<span class="pill" style="background:${color}">${esc(cut.beat)}${cut.beatWindow ? " · " + esc(cut.beatWindow) : ""}</span>`
+          : "";
+        const durationPill = cut.duration ? `<span class="pill pill--soft">${esc(cut.duration)}</span>` : "";
+        // keyframeDataUrl is validated as data:image/ in buildVideoJobSpec —
+        // esc() additionally neutralizes any quote-based attribute breakout.
+        const media = cut.keyframeDataUrl
+          ? `<img class="keyframe" src="${esc(cut.keyframeDataUrl)}" alt="컷 ${esc(cut.order)} 키프레임">`
+          : `<div class="keyframe keyframe--empty">키프레임 없음<br><small>먼저 키프레임을 생성하면 시트에 포함됩니다</small></div>`;
+        const prompt = (label, text) =>
+          `<div class="prompt"><span class="prompt-label">${label}</span><p>${text ? esc(text) : '<em class="empty">(비어 있음)</em>'}</p></div>`;
+        return [
+          `<section class="cut">`,
+          `<header><h2>컷 ${esc(cut.order)}${cut.sceneTitle ? " · " + esc(cut.sceneTitle) : ""}</h2><div class="pills">${beatPill}${durationPill}</div></header>`,
+          cut.beatRole ? `<p class="role">${esc(cut.beatRole)}</p>` : "",
+          `<div class="cut-body">${media}<div class="prompts">${prompt("Start frame", cut.startPrompt)}${prompt("Motion", cut.motionPrompt)}${prompt("End frame", cut.endPrompt)}</div></div>`,
+          `</section>`
+        ].join("");
+      }).join("\n");
+
+      return [
+        "<!DOCTYPE html>",
+        '<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
+        `<title>영상 잡스펙 — ${esc(spec.title)}</title>`,
+        "<style>",
+        "body{font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;margin:0;padding:32px;background:#f6f8fc;color:#1a2140;}",
+        ".sheet{max-width:920px;margin:0 auto;}",
+        "h1{font-size:24px;margin:0 0 4px;} .meta{color:#7581a3;font-size:13px;margin:0 0 20px;}",
+        ".negatives{background:#fff;border:1px solid rgba(15,23,42,.1);border-radius:14px;padding:14px 18px;margin-bottom:22px;}",
+        ".negatives h3{margin:0 0 8px;font-size:13px;color:#7581a3;} .negatives ul{margin:0;padding-left:18px;font-size:12.5px;line-height:1.6;}",
+        ".cut{background:#fff;border:1px solid rgba(15,23,42,.1);border-radius:16px;padding:18px 20px;margin-bottom:18px;page-break-inside:avoid;}",
+        ".cut header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}",
+        ".cut h2{font-size:16px;margin:0;} .pills{display:flex;gap:6px;}",
+        ".pill{padding:3px 10px;border-radius:999px;color:#fff;font-size:11px;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
+        ".pill--soft{background:#eef1fb;color:#5b6ba8;}",
+        ".role{margin:6px 0 0;font-size:12px;color:#7581a3;font-style:italic;}",
+        ".cut-body{display:flex;gap:16px;margin-top:12px;align-items:flex-start;}",
+        ".keyframe{width:260px;border-radius:10px;flex-shrink:0;display:block;}",
+        ".keyframe--empty{height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f1f4fa;color:#9aa5c4;font-size:12.5px;text-align:center;gap:4px;}",
+        ".prompts{flex:1;min-width:0;} .prompt{margin-bottom:10px;}",
+        ".prompt-label{display:block;font-size:11px;font-weight:700;color:#7f90f2;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px;}",
+        ".prompt p{margin:0;font-size:13px;line-height:1.55;word-break:break-word;} .empty{color:#b3bcd6;}",
+        "@media print{body{background:#fff;padding:12px;} .cut{border-color:#ccc;}}",
+        "@media (max-width:640px){.cut-body{flex-direction:column;} .keyframe{width:100%;}}",
+        "</style></head><body>",
+        '<div class="sheet">',
+        `<h1>영상 생성 잡스펙 — ${esc(spec.title)}</h1>`,
+        `<p class="meta">${metaBits.join(" · ")} · 모델 중립(Kling / Runway / Seedance / Higgsfield) · 키프레임을 I2V 시작 프레임으로 사용</p>`,
+        `<div class="negatives"><h3>공통 네거티브 제약 (모든 컷 적용)</h3><ul>${negatives}</ul></div>`,
+        cards,
+        "</div></body></html>"
+      ].join("\n");
     }
   };
 
