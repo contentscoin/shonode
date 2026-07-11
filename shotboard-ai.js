@@ -80,6 +80,7 @@
   const importWorkspaceInputEl = document.getElementById("importWorkspaceInput");
   const exportWorkspaceButtonEl = document.getElementById("exportWorkspaceButton");
   const exportVideoJobSpecButtonEl = document.getElementById("exportVideoJobSpecButton");
+  const exportClaimReportButtonEl = document.getElementById("exportClaimReportButton");
   const workspaceMainEl = document.querySelector(".workspace-main");
   const workspaceStageEl = document.querySelector(".workspace-stage");
   const workspaceOverlayEl = document.getElementById("workspaceOverlay");
@@ -863,6 +864,7 @@
   generatePlanButtonEl.addEventListener("click", handleGeneratePlan);
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
   exportVideoJobSpecButtonEl?.addEventListener("click", handleExportVideoJobSpec);
+  exportClaimReportButtonEl?.addEventListener("click", handleExportClaimReport);
   importWorkspaceInputEl?.addEventListener("change", handleImportWorkspaceInputChange);
   createWorkspaceButtonEl?.addEventListener("click", handleCreateWorkspace);
   duplicateWorkspaceButtonEl?.addEventListener("click", handleDuplicateWorkspace);
@@ -1032,7 +1034,8 @@
     closePreviewSidebar: () => closeSidebarSide("right"),
     exportWorkspace: handleExportWorkspace,
     importWorkspace: importWorkspaceSnapshot,
-    regenerateSelected: handleRegenerateSelectedPanels
+    regenerateSelected: handleRegenerateSelectedPanels,
+    buildClaimReport: buildClaimReportHtml
   };
 
   document.body.classList.remove("is-sidebar-collapsed", "is-preview-collapsed");
@@ -3889,6 +3892,163 @@
     } else {
       setStatus("영상 잡스펙을 내보냈습니다 — 모든 컷 준비 완료.");
     }
+  }
+
+  // Compliance deliverable: turns the qc_gate ruling, pattern risk controls,
+  // six-beat contract status, and per-cut claim-language findings into a
+  // self-contained, printable HTML report an agency can hand to a client or
+  // legal reviewer. Pure read of the current model — the export handler
+  // records claimFindings into project.claimLog.
+  function buildClaimReportHtml() {
+    const pack = window.ShonodeAdPack;
+    const contract = buildOutputContractReport();
+    if (!pack || !contract) {
+      return null;
+    }
+
+    const hasProof = project.hasProofAssets === true;
+    const risk = typeof pack.classifyProductRisk === "function"
+      ? pack.classifyProductRisk({
+          categoryId: project.productCategory,
+          hasProof,
+          brief: project.aiBrief || ""
+        })
+      : null;
+    const patternMeta = project.pattern?.id && Array.isArray(pack.creativePatterns)
+      ? pack.creativePatterns.find((item) => item.id === project.pattern.id) || null
+      : null;
+    const findingsByPanel = new Map();
+    contract.claimFindings.forEach((finding) => {
+      if (finding.panelId) {
+        findingsByPanel.set(finding.panelId, finding);
+      }
+    });
+
+    const riskLabels = { low: "저위험", proof_required: "증빙 필요", high: "고위험" };
+    const rulingLabels = {
+      allowed: "허용 (증빙 범위 내)",
+      claim_safe_rewrite: "클레임 세이프 리라이트 권장",
+      blocked: "차단 (클레임 세이프 모드)"
+    };
+    const generatedAt = new Date().toLocaleString("ko-KR");
+
+    const cutRows = panels.map((panel, index) => {
+      const finding = findingsByPanel.get(panel.id);
+      const beatMeta = BEAT_META[panel.beat];
+      return `<tr>
+        <td>${index + 1}</td>
+        <td>${beatMeta ? `<span class="chip" style="background:${beatMeta.color}">${escapeHtml(beatMeta.label)}</span>` : "미지정"}</td>
+        <td>${escapeHtml(panel.sceneTitle || `컷 ${index + 1}`)}</td>
+        <td>${escapeHtml(panel.caption || "")}</td>
+        <td>${finding ? escapeHtml(finding.claimText) : '<span class="ok">검출 없음</span>'}</td>
+        <td>${finding ? escapeHtml(rulingLabels[finding.ruling] || finding.ruling) : "-"}</td>
+      </tr>`;
+    }).join("\n");
+
+    const problemsHtml = contract.problems.length === 0
+      ? '<p class="ok">✅ 6비트 계약 충족 — 구조 결함이 없습니다.</p>'
+      : `<ul>${contract.problems.map((problem) => `<li>${escapeHtml(problem)}</li>`).join("")}</ul>`;
+
+    const negativeRules = Array.isArray(pack.promptRiskRules)
+      ? `<ul>${pack.promptRiskRules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")}</ul>`
+      : "";
+
+    return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>클레임 리포트 — ${escapeHtml(project.title || "Shonode 프로젝트")}</title>
+<style>
+  body { font-family: "Pretendard", "Noto Sans KR", -apple-system, sans-serif; color: #0f172a; margin: 40px auto; max-width: 820px; line-height: 1.6; padding: 0 16px; }
+  h1 { font-size: 22px; margin-bottom: 2px; }
+  h2 { font-size: 15px; margin: 26px 0 8px; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; }
+  .meta { color: #64748b; font-size: 12.5px; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: 12.5px; color: #fff; vertical-align: middle; }
+  .badge[data-risk="low"] { background: #16a34a; }
+  .badge[data-risk="proof_required"] { background: #d97706; }
+  .badge[data-risk="high"] { background: #dc2626; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; color: #fff; font-size: 11px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f8fafc; }
+  .ok { color: #16a34a; font-weight: 600; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  .disclaimer { margin-top: 32px; padding: 12px 14px; background: #fef9c3; border: 1px solid #fde047; border-radius: 8px; font-size: 12px; }
+  @media print { body { margin: 12mm; } }
+</style>
+</head>
+<body>
+<h1>클레임 리포트 <span class="badge" data-risk="${escapeHtml(risk?.level || "low")}">${escapeHtml(riskLabels[risk?.level] || "저위험")}</span></h1>
+<p class="meta">${escapeHtml(project.title || "제목 없음")} · 생성 ${escapeHtml(generatedAt)} · Shonode AI 사전점검</p>
+
+<h2>1. 제품 리스크 분류 (qc_gate)</h2>
+<table>
+  <tr><th>제품 카테고리</th><td>${escapeHtml(risk?.categoryLabel || "미분류")}${risk?.detected ? " (브리프에서 자동 감지)" : ""}</td></tr>
+  <tr><th>증빙 자료</th><td>${hasProof ? "보유 — 증빙 범위 내 주장 허용" : "없음 — 효능·수치·비교 주장 불가"}</td></tr>
+  <tr><th>판정</th><td>${escapeHtml(risk?.headline || "")} ${escapeHtml(risk?.detail || "")}</td></tr>
+  ${risk?.matchedKeywords?.length ? `<tr><th>감지 키워드</th><td>${escapeHtml(risk.matchedKeywords.join(", "))}</td></tr>` : ""}
+</table>
+
+<h2>2. 크리에이티브 패턴 리스크 컨트롤</h2>
+${patternMeta
+  ? `<table>
+  <tr><th>선택 패턴</th><td>${escapeHtml(patternMeta.label)} (${escapeHtml(patternMeta.id)}) · 소스: ${escapeHtml(patternMeta.sourceFamily)}</td></tr>
+  <tr><th>리스크 컨트롤</th><td>${escapeHtml(patternMeta.risk)}</td></tr>
+</table>`
+  : '<p class="meta">선택된 패턴 없음 — 자동 구성.</p>'}
+
+<h2>3. 6비트 계약 상태 (final_output_contract)</h2>
+${problemsHtml}
+
+<h2>4. 컷별 클레임 표현 검출 (${contract.claimFindings.length}건)</h2>
+<table>
+  <thead><tr><th>#</th><th>비트</th><th>씬</th><th>설명</th><th>클레임 표현</th><th>판정</th></tr></thead>
+  <tbody>
+${cutRows}
+  </tbody>
+</table>
+
+<h2>5. 레퍼런스 거리 · 네거티브 제약 (전 컷 공통 적용)</h2>
+${negativeRules}
+
+<div class="disclaimer">
+  ⚠️ 본 리포트는 Shonode의 AI 사전점검 결과이며 <strong>법률 자문이 아닙니다</strong>.
+  표시·광고 관련 최종 판단은 반드시 자격 있는 검토자(법무·심의 담당)의 확인을 거치세요.
+  클레임 표현 검출은 키워드 기반 스캔으로, 누락이나 오탐이 있을 수 있습니다.
+</div>
+</body>
+</html>`;
+  }
+
+  function handleExportClaimReport() {
+    if (panels.length === 0) {
+      setStatus("먼저 컷을 생성하거나 추가해 주세요.", "warning");
+      return;
+    }
+
+    const html = buildClaimReportHtml();
+    if (!html) {
+      setStatus("클레임 리포트 모듈을 불러오지 못했습니다.", "warning");
+      return;
+    }
+
+    // Keep the audit trail consistent with workspace export.
+    const contract = buildOutputContractReport();
+    if (contract) {
+      updateProject({ claimLog: contract.claimFindings }, { announce: false });
+    }
+
+    const fileName = `${sanitizeWorkspaceFileName(project.title)}-claim-report.html`;
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = url;
+    downloadLink.download = fileName;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    setStatus(`클레임 리포트를 내보냈습니다 — 클레임 표현 ${contract ? contract.claimFindings.length : 0}건 검출.`);
   }
 
   async function handleExportWorkspace() {
