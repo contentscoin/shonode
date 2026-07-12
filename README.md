@@ -117,6 +117,22 @@ npm run dev                    # Shonode 로컬 실행 후 AI 제공자에서 Co
 - **영상 잡스펙 (.md)** — 컷별 I2V 프롬프트·키프레임·네거티브 제약을 모델 중립 핸드오프 문서로. Kling·Runway·Seedance UI에 바로 붙여넣는 킷입니다.
 - **클레임 리포트 (.html)** — qc_gate 리스크 분류(카테고리·증빙·판정), 크리에이티브 패턴 리스크 컨트롤, 6비트 계약 상태, 컷별 클레임 표현 검출과 판정을 담은 인쇄 가능한 문서. 대행사가 클라이언트/법무 검토에 제출하는 근거 자료로 설계됐으며, 내보낼 때 검출 내역이 `project.claimLog`(워크스페이스 스냅샷 포함)에 기록됩니다. 하단에 "AI 사전점검이며 법률 자문이 아님" 고지가 고정 포함됩니다.
 
+## 크레딧 · 플랜 (수익화)
+
+클라우드 모드가 켜진 배포에서는 **서버 키(Gemini) 생성이 크레딧으로 운영**됩니다. 내 API 키(OpenAI)·Codex 제공자는 크레딧과 무관하게 계속 무료입니다.
+
+- **월간 지급**: Free 30 / Pro 600 / Team 2,000 크레딧 (매월 첫 사용 시 자동 지급, `profiles.plan` 기준)
+- **차감**: 스토리보드 생성 3크레딧, 키프레임 이미지 2크레딧 — **선차감(escrow)** 방식으로, 업스트림 실패 시 자동 환급됩니다
+- **기록**: 모든 차감/환급/지급이 `credit_ledger`(append-only)와 `generation_jobs`에 남아 원가 대시보드의 소스가 됩니다
+- **UI**: Gemini 상태 카드와 클라우드 다이얼로그에 잔액·플랜 표시. 미로그인 시 서버 키 생성은 로그인 안내(401), 잔액 부족은 402와 함께 사유가 표시됩니다
+- **셀프호스트 옵트아웃**: Supabase를 클라우드 저장용으로만 쓰고 과금은 끄려면 `SHONODE_CREDITS=off`
+- 스키마: [`supabase/migrations/0002_credits_and_shares.sql`](supabase/migrations/0002_credits_and_shares.sql)을 SQL Editor에서 실행 (0001 필요). 차감/환급은 SECURITY DEFINER RPC로만 가능하며 사용자별 advisory lock으로 원자성을 보장합니다
+- 결제(크레딧 팩 구매·플랜 업그레이드)는 PG 가맹 계약이 필요해 아직 스텁입니다 — 현재는 `profiles.plan`을 SQL로 변경해 Pro/Team을 부여할 수 있습니다
+
+## 공유 링크
+
+클라우드 다이얼로그의 프로젝트 목록에서 **"공유"** 버튼을 누르면 열람 전용 링크(`/?share=<token>`)가 클립보드에 복사됩니다. 링크를 받은 사람은 로그인 없이 스냅샷을 불러와 볼 수 있고(소유자 정보는 노출되지 않음), 변경 사항은 열람자 브라우저에만 저장됩니다.
+
 ## 클라우드 모드 (선택, Supabase)
 
 기본은 완전 로컬 동작입니다. 환경변수 두 개를 설정하면 계정 로그인 + 클라우드 프로젝트 저장이 켜집니다:
@@ -127,7 +143,7 @@ SUPABASE_ANON_KEY=your_supabase_anon_or_publishable_key
 ```
 
 - 브라우저는 `/api/config`에서 이 값을 받아옵니다. 미설정이면 클라우드 버튼 자체가 나타나지 않고 외부 요청도 없습니다. 환경변수 대신 `shonode.config.json`(공개 설정 파일)로도 제공할 수 있으며, 환경변수가 우선합니다.
-- 스키마는 [`supabase/migrations/0001_shonode_studio_init.sql`](supabase/migrations/0001_shonode_studio_init.sql)을 Supabase SQL Editor에서 실행해 적용합니다 — `profiles`, `projects` 테이블과 소유자 전용 RLS, 가입 시 프로필 자동 생성 트리거가 포함됩니다.
+- 스키마는 [`supabase/migrations/0001_shonode_studio_init.sql`](supabase/migrations/0001_shonode_studio_init.sql)과 [`0002_credits_and_shares.sql`](supabase/migrations/0002_credits_and_shares.sql)을 순서대로 Supabase SQL Editor에서 실행해 적용합니다 — profiles/projects + 크레딧/잡 로그/공유 테이블과 RLS·RPC가 포함됩니다.
 - 인증: 이메일/비밀번호 + Google OAuth(Supabase 대시보드에서 프로바이더 활성화 필요). Authentication → URL Configuration의 **Site URL**을 배포 도메인으로 설정하세요.
 - 클라우드 프로젝트는 `shonode-workspace-v2` 스냅샷 전체를 저장하며, `.shonode` 내보내기/가져오기는 그대로 유지됩니다(락인 방지).
 - anon key는 공개 설계값입니다(데이터 접근은 RLS로 보호). Gemini 키와 Supabase service-role 키는 절대 클라이언트에 노출하지 마세요.

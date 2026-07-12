@@ -15,6 +15,7 @@
     }
 
     mountHeaderButton();
+    await maybeOpenSharedProject();
     window.ShonodeCloud.onAuthChange(() => {
       refreshCloudButtonLabel();
       if (dialogEl) {
@@ -46,6 +47,69 @@
     const user = window.ShonodeCloud.getUser();
     cloudButtonEl.textContent = user ? "클라우드 ●" : "클라우드";
     cloudButtonEl.title = user ? `로그인됨: ${user.email || user.id}` : "클라우드 로그인 / 프로젝트";
+  }
+
+  async function maybeOpenSharedProject() {
+    const shareToken = new URLSearchParams(window.location.search).get("share");
+    if (!shareToken || !/^[a-f0-9]{16,64}$/i.test(shareToken)) {
+      return;
+    }
+
+    try {
+      const client = window.ShonodeCloud.getClient();
+      const { data, error } = await client.rpc("get_shared_snapshot", { share_token: shareToken });
+      if (error) {
+        throw error;
+      }
+      if (!data?.snapshot || typeof data.snapshot !== "object") {
+        throw new Error("스냅샷이 비어 있습니다.");
+      }
+
+      const title = typeof data.title === "string" && data.title ? data.title : "공유된 프로젝트";
+      const proceed = window.confirm(`공유된 프로젝트 "${title}"을(를) 불러올까요?\n현재 캔버스 내용을 덮어씁니다.`);
+      if (proceed) {
+        await window.ShonodeWorkspaceBridge.importWorkspace(data.snapshot);
+        showShareBanner(title);
+      }
+    } catch (error) {
+      console.warn("[ShonodeCloud] shared project load failed.", error);
+      window.alert("공유 링크를 열 수 없습니다. 링크가 만료되었거나 삭제되었을 수 있습니다.");
+    } finally {
+      // Strip the token so refreshes don't re-trigger the import prompt.
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }
+
+  function showShareBanner(title) {
+    const banner = document.createElement("div");
+    banner.className = "share-view-banner";
+    banner.innerHTML = `<span>🔗 공유된 프로젝트 <strong>${escapeText(title)}</strong>를 보는 중 — 변경 사항은 내 브라우저에만 저장됩니다.</span>`;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "닫기";
+    close.addEventListener("click", () => banner.remove());
+    banner.appendChild(close);
+    document.body.appendChild(banner);
+  }
+
+  async function fetchAccountSummary() {
+    try {
+      const client = window.ShonodeCloud.getClient();
+      const user = window.ShonodeCloud.getUser();
+      if (!client || !user) {
+        return null;
+      }
+      const [{ data: balance }, { data: profile }] = await Promise.all([
+        client.rpc("get_credit_balance"),
+        client.from("profiles").select("plan").eq("id", user.id).maybeSingle()
+      ]);
+      return {
+        balance: Number.isFinite(balance) ? balance : null,
+        plan: profile?.plan || "free"
+      };
+    } catch {
+      return null;
+    }
   }
 
   function openDialog() {
@@ -171,6 +235,7 @@
         <button type="button" class="cloud-dialog-close" aria-label="닫기">×</button>
       </header>
       <p class="cloud-dialog-note">${escapeText(user.email || user.id)} 계정</p>
+      <p class="cloud-dialog-note cloud-account-summary">플랜·크레딧 확인 중…</p>
       <p class="cloud-dialog-error" hidden></p>
       <div class="cloud-dialog-actions">
         <button type="button" class="primary-button" data-action="save">현재 작업 저장</button>
@@ -198,6 +263,21 @@
     });
     card.querySelector('[data-action="save-new"]').addEventListener("click", async () => {
       await saveCurrentWorkspace({ asNew: true, errorEl, listEl, user });
+    });
+
+    fetchAccountSummary().then((summary) => {
+      const summaryEl = card.querySelector(".cloud-account-summary");
+      if (!summaryEl) {
+        return;
+      }
+      if (!summary) {
+        summaryEl.hidden = true;
+        return;
+      }
+      const planLabel = { free: "Free", pro: "Pro", team: "Team" }[summary.plan] || summary.plan;
+      summaryEl.textContent = summary.balance === null
+        ? `플랜 ${planLabel}`
+        : `플랜 ${planLabel} · 크레딧 잔액 ${summary.balance} (매월 자동 지급 · 스토리보드 3cr, 키프레임 2cr)`;
     });
 
     await refreshProjectList(listEl, errorEl);
@@ -233,11 +313,15 @@
           </div>
           <div class="cloud-project-actions">
             <button type="button" class="secondary-button" data-load>불러오기</button>
+            <button type="button" class="ghost-button" data-share aria-label="공유 링크">공유</button>
             <button type="button" class="ghost-button" data-delete aria-label="삭제">삭제</button>
           </div>
         `;
         item.querySelector("[data-load]").addEventListener("click", async () => {
           await loadCloudProject(row.id, errorEl);
+        });
+        item.querySelector("[data-share]").addEventListener("click", async () => {
+          await shareCloudProject(row.id, errorEl);
         });
         item.querySelector("[data-delete]").addEventListener("click", async () => {
           await deleteCloudProject(row.id, listEl, errorEl);
@@ -331,6 +415,41 @@
       await window.ShonodeWorkspaceBridge.importWorkspace(data.snapshot);
       window.localStorage.setItem(CLOUD_PROJECT_ID_STORAGE_KEY, data.id);
       closeDialog();
+    } catch (error) {
+      showError(errorEl, error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function shareCloudProject(projectId, errorEl) {
+    if (busy) {
+      return;
+    }
+    busy = true;
+    errorEl.hidden = true;
+    try {
+      const client = window.ShonodeCloud.getClient();
+      const { data, error } = await client.rpc("create_share", { target_project_id: projectId });
+      if (error) {
+        throw error;
+      }
+      const token = data?.token;
+      if (!token) {
+        throw new Error("공유 토큰을 만들지 못했습니다.");
+      }
+      const shareUrl = `${window.location.origin}/?share=${token}`;
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+      errorEl.textContent = copied
+        ? "열람 전용 공유 링크가 클립보드에 복사되었습니다."
+        : `공유 링크: ${shareUrl}`;
+      errorEl.hidden = false;
     } catch (error) {
       showError(errorEl, error);
     } finally {

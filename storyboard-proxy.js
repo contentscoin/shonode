@@ -56,7 +56,17 @@ async function handleStoryboardProxy(request, response, options = {}) {
     return;
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  // Credit metering (escrow): server-key usage is charged when cloud mode is
+  // configured; self-hosted deployments without Supabase stay free.
+  const { chargeCredits } = require("./credits");
+  const charge = await chargeCredits(request, { stage: "storyboard", provider: "gemini" });
+  if (charge.errorStatus) {
+    sendJson(response, charge.errorStatus, charge.errorBody);
+    return;
+  }
+
+  const baseUrl = (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com").replace(/\/+$/, "");
+  const endpoint = `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   let upstreamResponse;
   try {
     upstreamResponse = await fetch(endpoint, {
@@ -68,6 +78,9 @@ async function handleStoryboardProxy(request, response, options = {}) {
       body: JSON.stringify(storyboardRequest)
     });
   } catch (error) {
+    if (!charge.skip) {
+      await charge.refund("upstream_fetch_failed");
+    }
     sendJson(response, 502, {
       error: "Failed to reach Gemini upstream.",
       details: error.message || "Unknown fetch error."
@@ -76,6 +89,17 @@ async function handleStoryboardProxy(request, response, options = {}) {
   }
 
   const responseText = await upstreamResponse.text();
+  if (!charge.skip) {
+    if (upstreamResponse.ok) {
+      await charge.finish(true);
+      if (charge.balance !== null) {
+        response.setHeader("x-shonode-credit-balance", String(charge.balance));
+        response.setHeader("Access-Control-Expose-Headers", "x-shonode-credit-balance");
+      }
+    } else {
+      await charge.refund(`upstream_${upstreamResponse.status}`);
+    }
+  }
   response.statusCode = upstreamResponse.status;
   response.setHeader("Content-Type", upstreamResponse.headers.get("content-type") || "application/json; charset=utf-8");
   response.end(responseText);
@@ -260,7 +284,7 @@ function setCorsHeaders(response, allowOrigin) {
   }
 
   response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type, x-shonode-auth");
 }
 
 function sendJson(response, statusCode, payload) {

@@ -976,6 +976,36 @@
           : "서버에 Gemini 키가 없습니다 — 생성 시 오프라인 초안으로 대체됩니다.",
         configured ? "" : "운영자가 GEMINI_API_KEY를 설정하거나, 다른 제공자를 선택하세요."
       );
+
+      // Credit balance for metered server-key usage (cloud mode + logged in).
+      const cloudClient = window.ShonodeCloud?.getClient?.();
+      const cloudUser = window.ShonodeCloud?.getUser?.();
+      if (configured && cloudClient && cloudUser) {
+        try {
+          const { data, error } = await cloudClient.rpc("get_credit_balance");
+          if (token === providerStatusToken && !error && Number.isFinite(data)) {
+            setProviderStatus(
+              data > 0 ? "ok" : "warn",
+              data > 0
+                ? `서버 Gemini 키 설정됨 — 크레딧 잔액 ${data}`
+                : "크레딧이 모두 소진되었습니다.",
+              data > 0
+                ? "스토리보드 생성 3크레딧 · 키프레임 2크레딧. 매월 플랜 크레딧이 자동 지급됩니다."
+                : "다음 달 지급을 기다리거나, 내 API 키(OpenAI) 제공자를 선택하세요.",
+              true
+            );
+          }
+        } catch {
+          // balance display is best-effort
+        }
+      } else if (configured && serverConfigCache?.supabaseUrl && !cloudUser) {
+        setProviderStatus(
+          "warn",
+          "서버 Gemini 생성은 로그인 후 크레딧으로 이용할 수 있습니다.",
+          "헤더의 '클라우드' 버튼으로 로그인하거나, 내 API 키(OpenAI) 제공자를 선택하세요.",
+          true
+        );
+      }
       return;
     }
 
@@ -2824,6 +2854,7 @@
       };
       let plan = null;
       let source = "local";
+      let fallbackReason = "";
 
       const aiClient = window.ShonodeAI || window.ShotBoardAI;
       if (aiClient && typeof aiClient.generateStoryboard === "function") {
@@ -2833,16 +2864,28 @@
             source = "api";
           }
         } catch (error) {
+          fallbackReason = typeof error?.message === "string" ? error.message : "";
           console.warn("ShonodeAI.generateStoryboard failed, using local fallback.", error);
         }
       }
 
       if (!plan) {
         plan = buildLocalStoryboardPlan(payload);
-        setStatus("AI 연결에 실패해 로컬 초안으로 대체했습니다.", "warning");
       }
 
       applyStoryboardPlan(normalizePlan(plan, payload), source);
+
+      // Set the fallback warning AFTER applyStoryboardPlan — it writes its own
+      // success status, which would instantly clobber the reason the user
+      // actually needs to see (credit shortage, login required, network).
+      if (source === "local") {
+        setStatus(
+          fallbackReason
+            ? `AI 연결에 실패해 로컬 초안으로 대체했습니다 — ${fallbackReason.slice(0, 120)}`
+            : "AI 연결에 실패해 로컬 초안으로 대체했습니다.",
+          "warning"
+        );
+      }
     } finally {
       setGeneratingState(false);
     }
