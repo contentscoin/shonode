@@ -88,9 +88,35 @@ async function handleStoryboardProxy(request, response, options = {}) {
     return;
   }
 
-  const responseText = await upstreamResponse.text();
+  let responseText;
+  try {
+    responseText = await upstreamResponse.text();
+  } catch (error) {
+    if (!charge.skip) {
+      await charge.refund("upstream_body_read_failed");
+    }
+    sendJson(response, 502, {
+      error: "Failed to read Gemini upstream response.",
+      details: error.message || "Unknown body read error."
+    });
+    return;
+  }
+
   if (!charge.skip) {
     if (upstreamResponse.ok) {
+      // A 200 with no usable text (safety block, empty candidates, malformed
+      // JSON) gives the user nothing — refund instead of finishing the charge.
+      const planText = extractPlanText(responseText);
+      if (planText === null) {
+        await charge.refund("upstream_invalid_json");
+        sendJson(response, 502, { error: "Gemini returned invalid JSON." });
+        return;
+      }
+      if (!planText) {
+        await charge.refund("upstream_no_text");
+        sendJson(response, 502, { error: "Gemini returned no storyboard text." });
+        return;
+      }
       await charge.finish(true);
       if (charge.balance !== null) {
         response.setHeader("x-shonode-credit-balance", String(charge.balance));
@@ -103,6 +129,25 @@ async function handleStoryboardProxy(request, response, options = {}) {
   response.statusCode = upstreamResponse.status;
   response.setHeader("Content-Type", upstreamResponse.headers.get("content-type") || "application/json; charset=utf-8");
   response.end(responseText);
+}
+
+// Returns the concatenated candidate text, "" when the response parses but
+// carries no text, or null when the body is not valid JSON.
+function extractPlanText(responseText) {
+  let result;
+  try {
+    result = JSON.parse(responseText);
+  } catch {
+    return null;
+  }
+  const parts = result?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) {
+    return "";
+  }
+  return parts
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
 }
 
 function getOriginPolicy(request, options = {}) {

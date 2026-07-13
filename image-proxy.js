@@ -87,7 +87,12 @@ async function handleGeminiImageProxy(request, response, options = {}) {
   }
 
   if (!upstream.ok) {
-    const text = await upstream.text();
+    let text = "";
+    try {
+      text = await upstream.text();
+    } catch {
+      // Refund below either way; the error detail is best-effort.
+    }
     if (!charge.skip) {
       await charge.refund(`upstream_${upstream.status}`);
     }

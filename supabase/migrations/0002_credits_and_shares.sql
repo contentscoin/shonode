@@ -24,10 +24,10 @@ create index if not exists credit_ledger_user_idx
 
 alter table public.credit_ledger enable row level security;
 
+-- No client SELECT: ledger rows carry job_id, which acts as the refund
+-- capability held only by the API layer. Balance/history are exposed through
+-- SECURITY DEFINER RPCs instead. (Operators read the table via SQL/service role.)
 drop policy if exists credit_ledger_select_own on public.credit_ledger;
-create policy credit_ledger_select_own
-  on public.credit_ledger for select
-  using (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
 -- generation_jobs: one row per metered server-side generation call.
@@ -49,10 +49,11 @@ create index if not exists generation_jobs_user_idx
 
 alter table public.generation_jobs enable row level security;
 
+-- No client SELECT: a user who can read their own *running* job id could call
+-- refund_credits while the server is still awaiting the upstream result and
+-- keep both the generation and the refund. Job ids are only ever returned to
+-- the API layer by consume_credits, making them unguessable capabilities.
 drop policy if exists generation_jobs_select_own on public.generation_jobs;
-create policy generation_jobs_select_own
-  on public.generation_jobs for select
-  using (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
 -- Plan-based monthly credit grants.
@@ -108,6 +109,42 @@ begin
 end;
 $$;
 
+-- Self-heal: refund the caller's jobs stuck in 'running' for over 10 minutes.
+-- Legitimate generations finish in seconds; only crashed API flows linger.
+-- The age gate keeps the in-flight self-refund attack closed.
+create or replace function public.reclaim_stale_credits()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  stale record;
+  current_balance integer;
+begin
+  if uid is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(uid::text));
+
+  for stale in
+    select * from generation_jobs
+    where user_id = uid and status = 'running' and created_at < now() - interval '10 minutes'
+    for update
+  loop
+    update generation_jobs
+    set status = 'refunded', error = 'stale_auto_refund', finished_at = now()
+    where id = stale.id;
+
+    select coalesce(sum(delta), 0) into current_balance from credit_ledger where user_id = uid;
+    insert into credit_ledger (user_id, delta, reason, stage, job_id, balance_after)
+    values (uid, stale.credit_cost, 'refund', stale.stage, stale.id, current_balance + stale.credit_cost);
+  end loop;
+end;
+$$;
+
 create or replace function public.get_credit_balance()
 returns integer
 language plpgsql
@@ -122,6 +159,7 @@ begin
     raise exception 'not authenticated';
   end if;
   perform ensure_monthly_grant();
+  perform reclaim_stale_credits();
   select coalesce(sum(delta), 0) into current_balance from credit_ledger where user_id = uid;
   return current_balance;
 end;
@@ -320,8 +358,21 @@ begin
 end;
 $$;
 
-grant execute on function public.get_shared_snapshot(text) to anon;
+-- PostgreSQL grants EXECUTE to PUBLIC on new functions by default — revoke it
+-- everywhere first, then grant only what each role needs.
+revoke all on function public.plan_monthly_credits(text) from public;
+revoke all on function public.ensure_monthly_grant() from public;
+revoke all on function public.get_credit_balance() from public;
+revoke all on function public.reclaim_stale_credits() from public;
+revoke all on function public.consume_credits(integer, text, text) from public;
+revoke all on function public.refund_credits(uuid, text) from public;
+revoke all on function public.finish_generation_job(uuid, boolean, text) from public;
+revoke all on function public.create_share(uuid) from public;
+revoke all on function public.get_shared_snapshot(text) from public;
+
+grant execute on function public.get_shared_snapshot(text) to anon, authenticated;
 grant execute on function public.get_credit_balance() to authenticated;
+grant execute on function public.reclaim_stale_credits() to authenticated;
 grant execute on function public.consume_credits(integer, text, text) to authenticated;
 grant execute on function public.refund_credits(uuid, text) to authenticated;
 grant execute on function public.finish_generation_job(uuid, boolean, text) to authenticated;
