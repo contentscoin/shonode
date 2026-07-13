@@ -12,6 +12,30 @@ const shonodeAiClient = {
   OPENAI_KEY_STORAGE_KEY: "shonode-openai-key-v1",
   OPENAI_MODEL_STORAGE_KEY: "shonode-openai-model-v1",
 
+  // Supabase access token from the cloud session (when logged in). Sent only
+  // to same-origin server-key (Gemini) endpoints for credit metering.
+  getAuthHeaders() {
+    try {
+      const token = window.ShonodeCloud?.getSession?.()?.access_token;
+      return token ? { "x-shonode-auth": token } : {};
+    } catch {
+      return {};
+    }
+  },
+
+  async readProxyError(response) {
+    const raw = await response.text();
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.error) {
+        return `${parsed.error}${parsed.hint ? ` ${parsed.hint}` : ""}`;
+      }
+    } catch {
+      // fall through to raw text
+    }
+    return raw.slice(0, 300);
+  },
+
   get baseOrigin() {
     return window.location.protocol === "file:"
       ? "http://127.0.0.1:4173"
@@ -99,13 +123,16 @@ const shonodeAiClient = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(isOpenAI ? { "x-openai-key": settings.openaiKey } : {}),
+        ...(isOpenAI ? { "x-openai-key": settings.openaiKey } : this.getAuthHeaders()),
         ...this.headers
       },
       body: JSON.stringify(isOpenAI ? { prompt: cleanPrompt } : { prompt: cleanPrompt, images: safeImages })
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 402) {
+        throw new Error(await this.readProxyError(response));
+      }
       const errorText = await response.text();
       throw new Error(`키프레임 생성 실패: ${response.status} ${errorText.slice(0, 300)}`);
     }
@@ -133,6 +160,7 @@ const shonodeAiClient = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...this.getAuthHeaders(),
         ...this.headers
       },
       body: JSON.stringify({
@@ -142,6 +170,9 @@ const shonodeAiClient = {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 402) {
+        throw new Error(await this.readProxyError(response));
+      }
       const errorText = await response.text();
       throw new Error(`Shonode AI proxy failed: ${response.status} ${errorText}`);
     }

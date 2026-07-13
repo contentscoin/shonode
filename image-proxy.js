@@ -17,7 +17,7 @@ const MAX_IMAGE_DATA_URL_LENGTH = 25 * 1024 * 1024;
  */
 async function handleGeminiImageProxy(request, response, options = {}) {
   const originPolicy = getOriginPolicy(request, options);
-  setCorsHeaders(response, originPolicy.allowOrigin, "Content-Type");
+  setCorsHeaders(response, originPolicy.allowOrigin, "Content-Type, x-shonode-auth");
 
   if (request.method === "OPTIONS") {
     response.statusCode = originPolicy.allowed ? 204 : 403;
@@ -47,6 +47,13 @@ async function handleGeminiImageProxy(request, response, options = {}) {
     return;
   }
 
+  const { chargeCredits } = require("./credits");
+  const charge = await chargeCredits(request, { stage: "image", provider: "gemini" });
+  if (charge.errorStatus) {
+    sendJson(response, charge.errorStatus, charge.errorBody);
+    return;
+  }
+
   const parts = [{ text: body.prompt }];
   body.images.forEach((dataUrl) => {
     const inline = dataUrlToInlineData(dataUrl);
@@ -72,12 +79,23 @@ async function handleGeminiImageProxy(request, response, options = {}) {
       })
     });
   } catch (error) {
+    if (!charge.skip) {
+      await charge.refund("upstream_fetch_failed");
+    }
     sendJson(response, 502, { error: "Failed to reach Gemini upstream.", details: error.message || "" });
     return;
   }
 
   if (!upstream.ok) {
-    const text = await upstream.text();
+    let text = "";
+    try {
+      text = await upstream.text();
+    } catch {
+      // Refund below either way; the error detail is best-effort.
+    }
+    if (!charge.skip) {
+      await charge.refund(`upstream_${upstream.status}`);
+    }
     sendJson(response, upstream.status, { error: "Gemini image generation failed.", details: text.slice(0, 2000) });
     return;
   }
@@ -86,6 +104,9 @@ async function handleGeminiImageProxy(request, response, options = {}) {
   try {
     result = await upstream.json();
   } catch {
+    if (!charge.skip) {
+      await charge.refund("upstream_invalid_json");
+    }
     sendJson(response, 502, { error: "Gemini returned invalid JSON." });
     return;
   }
@@ -95,10 +116,20 @@ async function handleGeminiImageProxy(request, response, options = {}) {
   );
   const inline = imagePart?.inlineData || imagePart?.inline_data;
   if (!inline?.data) {
+    if (!charge.skip) {
+      await charge.refund("upstream_no_image");
+    }
     sendJson(response, 502, { error: "Gemini returned no image data." });
     return;
   }
 
+  if (!charge.skip) {
+    await charge.finish(true);
+    if (charge.balance !== null) {
+      response.setHeader("x-shonode-credit-balance", String(charge.balance));
+      response.setHeader("Access-Control-Expose-Headers", "x-shonode-credit-balance");
+    }
+  }
   const mimeType = inline.mimeType || inline.mime_type || "image/png";
   sendJson(response, 200, { dataUrl: `data:${mimeType};base64,${inline.data}` });
 }
