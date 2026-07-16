@@ -379,6 +379,50 @@
       return { pass: problems.length === 0, problems, claimFindings };
     },
 
+    // storyboard_beats — scale the 30s six-beat contract to another runtime.
+    // Returns [{ beat, window, role }] with rescaled windows ("0-1.5s" style).
+    scaleSixBeatContract(targetSeconds) {
+      const total = Number(targetSeconds);
+      if (!Number.isFinite(total) || total <= 0 || total === 30) {
+        return this.sixBeatContract.map((item) => ({ ...item }));
+      }
+      const factor = total / 30;
+      const fmt = (value) => {
+        const scaled = Math.round(value * factor * 2) / 2;
+        return Number.isInteger(scaled) ? String(scaled) : scaled.toFixed(1);
+      };
+      return this.sixBeatContract.map((item) => {
+        const match = item.window.match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)s$/);
+        if (!match) {
+          return { ...item };
+        }
+        return { ...item, window: `${fmt(Number(match[1]))}-${fmt(Number(match[2]))}s` };
+      });
+    },
+
+    // 15/30/45s 변형 — Korean directive that rebudgets the six beats for the
+    // target runtime (기획서 §2 Step 3: 비트 duration 스케일링으로 파생 생성).
+    buildDurationDirective(targetSeconds) {
+      const total = Number(targetSeconds);
+      if (!Number.isFinite(total) || total <= 0) {
+        return "";
+      }
+      const beats = this.scaleSixBeatContract(total)
+        .map((item) => `${item.beat} ${item.window}`)
+        .join(", ");
+      const cutGuide = total <= 15
+        ? "4~6컷 (컷당 2~4초)"
+        : total <= 30
+          ? "6~8컷 (컷당 3~5초)"
+          : "8~10컷 (컷당 4~6초)";
+      return [
+        `[영상 길이] 총 ${total}초 광고로 구성하세요. 브리프에 다른 길이가 적혀 있어도 이 지시가 우선합니다.`,
+        `비트 시간 예산(30초 계약을 ${total}초로 스케일): ${beats}.`,
+        `권장 컷 수: ${cutGuide}. 모든 컷의 durationLabel 합이 총 ${total}초가 되어야 합니다.`,
+        "여섯 비트를 순서대로 커버하되, 컷 수가 부족하면 tension은 hook에, joy는 cta에 병합하세요."
+      ].join(" ");
+    },
+
     buildPromptSection() {
       const beats = this.sixBeatContract
         .map((item) => `  - ${item.beat} (${item.window}): ${item.role}`)

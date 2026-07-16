@@ -162,6 +162,16 @@
                   <span>인증·시험성적서 보유</span>
                 </span>
               </label>
+
+              <label class="sidebar-field">
+                <span class="sidebar-label">영상 길이</span>
+                <select id="targetDurationInput" class="sidebar-input sidebar-select">
+                  <option value="">자동 — 브리프를 따름</option>
+                  <option value="15">15초</option>
+                  <option value="30">30초</option>
+                  <option value="45">45초</option>
+                </select>
+              </label>
             </div>
 
             <div id="qcRiskBadge" class="qc-risk-badge" data-risk="low" role="status" aria-live="polite" hidden></div>
@@ -251,6 +261,18 @@
               </span>
               <span id="generatePlanButtonLabel">AI 콘티 초안 생성</span>
             </button>
+
+            <!-- 15/30/45s 변형 파생: 현재 보드의 컨셉을 유지한 채 비트 시간 예산을
+                 목표 길이로 다시 배분해 재생성한다 (기획서 §2 Step 3). -->
+            <div class="variant-derive-row" role="group" aria-label="길이 변형 파생">
+              <span class="variant-derive-label">길이 변형 파생</span>
+              <div class="variant-derive-buttons">
+                <button class="ghost-button variant-derive-button" type="button" data-variant="15">15초</button>
+                <button class="ghost-button variant-derive-button" type="button" data-variant="30">30초</button>
+                <button class="ghost-button variant-derive-button" type="button" data-variant="45">45초</button>
+              </div>
+              <p class="variant-derive-hint">현재 보드의 컨셉·패턴을 유지하며 선택한 길이로 재구성합니다. 이전 보드는 실행 취소로 복원됩니다.</p>
+            </div>
 
             <div id="aiGenerationIndicator" class="ai-generation-indicator" hidden aria-live="polite">
               <div class="ai-generation-visual" aria-hidden="true">

@@ -474,6 +474,8 @@ const shonodeAiClient = {
     const brief = payload?.brief?.trim() || "";
     const qcDirective = typeof payload?.qcDirective === "string" ? payload.qcDirective.trim() : "";
     const patternDirective = typeof payload?.patternDirective === "string" ? payload.patternDirective.trim() : "";
+    const durationDirective = typeof payload?.durationDirective === "string" ? payload.durationDirective.trim() : "";
+    const variantDirective = typeof payload?.variantDirective === "string" ? payload.variantDirective.trim() : "";
     const project = payload?.project || {};
     const existingCount = Number(payload?.existingPanelCount) || 0;
     const referenceImageCount = Number(payload?.referenceImageCount) || 0;
@@ -587,6 +589,8 @@ const shonodeAiClient = {
       "",
       qcDirective ? `QC gate ruling (obey before writing any claim): ${qcDirective}` : "",
       patternDirective ? `Creative pattern directive (build the storyboard on this grammar): ${patternDirective}` : "",
+      durationDirective ? `Target runtime directive (overrides any other length hint, including the brief): ${durationDirective}` : "",
+      variantDirective ? `Variant derivation directive (rebuild from this existing board, do not invent a new concept):\n${variantDirective}` : "",
       "User brief:",
       brief
     ].join("\n");
