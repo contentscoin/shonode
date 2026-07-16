@@ -4624,3 +4624,45 @@ body.is-beat-lane-mode .caption-input {
   font-size: 11.5px;
   cursor: pointer;
 }
+
+/* ── 15/30/45s 길이 변형 파생 ────────────────────────────────────────────── */
+.variant-derive-row {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.variant-derive-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-sub);
+}
+
+.variant-derive-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.variant-derive-button {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 0.84rem;
+}
+
+.variant-derive-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.variant-derive-hint {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-sub);
+}

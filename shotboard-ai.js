@@ -72,6 +72,8 @@
   const hasProofAssetsInputEl = document.getElementById("hasProofAssetsInput");
   const qcRiskBadgeEl = document.getElementById("qcRiskBadge");
   const creativePatternInputEl = document.getElementById("creativePatternInput");
+  const targetDurationInputEl = document.getElementById("targetDurationInput");
+  const variantDeriveButtonEls = Array.from(document.querySelectorAll(".variant-derive-button"));
   const patternRecommendOutputEl = document.getElementById("patternRecommendOutput");
   const selectionDetailOutputEl = document.getElementById("selectionDetailOutput");
   const generatePlanButtonEl = document.getElementById("generatePlanButton");
@@ -162,6 +164,7 @@
       previewPosterUrl: "",
       productCategory: "",
       hasProofAssets: false,
+      targetDuration: "",
       pattern: null,
       claimLog: []
     };
@@ -179,6 +182,7 @@
       previewPosterUrl: typeof candidate?.previewPosterUrl === "string" ? candidate.previewPosterUrl : "",
       productCategory: sanitizeProductCategory(candidate?.productCategory),
       hasProofAssets: candidate?.hasProofAssets === true,
+      targetDuration: sanitizeTargetDuration(candidate?.targetDuration),
       pattern: sanitizeProjectPattern(candidate?.pattern),
       claimLog: sanitizeClaimLog(candidate?.claimLog)
     };
@@ -196,6 +200,11 @@
       return candidate;
     }
     return categories.some((cat) => cat.id === candidate) ? candidate : "";
+  }
+
+  function sanitizeTargetDuration(candidate) {
+    const value = typeof candidate === "number" ? String(candidate) : candidate;
+    return ["15", "30", "45"].includes(value) ? value : "";
   }
 
   function sanitizeProjectPattern(candidate) {
@@ -243,6 +252,7 @@
       previewPosterUrl: projectValue.previewPosterUrl ?? "",
       productCategory: sanitizeProductCategory(projectValue.productCategory),
       hasProofAssets: projectValue.hasProofAssets === true,
+      targetDuration: sanitizeTargetDuration(projectValue.targetDuration),
       pattern: projectValue.pattern ? { ...projectValue.pattern } : null,
       claimLog: Array.isArray(projectValue.claimLog) ? projectValue.claimLog.map((entry) => ({ ...entry })) : []
     };
@@ -338,6 +348,9 @@
     }
     if (hasProofAssetsInputEl) {
       hasProofAssetsInputEl.checked = project.hasProofAssets === true;
+    }
+    if (targetDurationInputEl) {
+      targetDurationInputEl.value = sanitizeTargetDuration(project.targetDuration);
     }
     if (creativePatternInputEl) {
       const patternId = project.pattern?.id ?? "";
@@ -834,6 +847,10 @@
     updateProject({ pattern: buildPatternFromId(creativePatternInputEl.value) }, { announce: false });
     renderPatternRecommendations();
   });
+  targetDurationInputEl?.addEventListener("change", () => {
+    pushHistoryState();
+    updateProject({ targetDuration: sanitizeTargetDuration(targetDurationInputEl.value) }, { announce: false });
+  });
   patternRecommendOutputEl?.addEventListener("click", (event) => {
     const chip = event.target.closest(".pattern-recommend__chip");
     if (!chip) {
@@ -862,6 +879,14 @@
   });
 
   generatePlanButtonEl.addEventListener("click", handleGeneratePlan);
+  variantDeriveButtonEls.forEach((button) => {
+    button.addEventListener("click", () => {
+      const seconds = Number(button.dataset.variant);
+      if (Number.isFinite(seconds) && seconds > 0) {
+        handleDeriveVariant(seconds);
+      }
+    });
+  });
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
   exportVideoJobSpecButtonEl?.addEventListener("click", handleExportVideoJobSpec);
   exportClaimReportButtonEl?.addEventListener("click", handleExportClaimReport);
@@ -2790,7 +2815,11 @@
     const patternDirective = project.pattern && pack && typeof pack.buildPatternDirective === "function"
       ? pack.buildPatternDirective(project.pattern, { hasProof: project.hasProofAssets === true })
       : "";
-    return { qcRisk, qcDirective, patternDirective };
+    const targetSeconds = Number(sanitizeTargetDuration(project.targetDuration)) || 0;
+    const durationDirective = targetSeconds && pack && typeof pack.buildDurationDirective === "function"
+      ? pack.buildDurationDirective(targetSeconds)
+      : "";
+    return { qcRisk, qcDirective, patternDirective, durationDirective, targetSeconds };
   }
 
   // final_output_contract — validate the current board against the six-beat
@@ -2833,7 +2862,7 @@
     setStatus("브리프를 분석해 컷 초안을 생성하고 있습니다.");
 
     try {
-      const { qcRisk, qcDirective, patternDirective } = buildGenerationDirectives(brief);
+      const { qcRisk, qcDirective, patternDirective, durationDirective, targetSeconds } = buildGenerationDirectives(brief);
 
       const payload = {
         brief,
@@ -2841,6 +2870,8 @@
         qcRisk,
         qcDirective,
         patternDirective,
+        durationDirective,
+        targetSeconds,
         existingPanelCount: panels.length,
         referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),
         referenceImageCount: aiReferenceImages.length,
@@ -2891,6 +2922,123 @@
     }
   }
 
+  // 15/30/45s 변형 파생 — regenerate the CURRENT board at another runtime,
+  // keeping its concept/pattern (기획서 §2 Step 3). Same provider path (and
+  // metering) as a full generation; the previous board stays one undo away.
+  async function handleDeriveVariant(targetSeconds) {
+    if (aiGenerating) {
+      return;
+    }
+    if (panels.length === 0) {
+      setStatus("파생할 스토리보드가 없습니다. 먼저 콘티 초안을 생성해주세요.", "warning");
+      return;
+    }
+
+    const brief = project.aiBrief?.trim()
+      || [project.title, project.logline].filter(Boolean).join(" — ").trim()
+      || "기존 스토리보드를 기반으로 한 광고";
+
+    setGeneratingState(true);
+    pushHistoryState();
+    setStatus(`기존 보드를 유지하며 ${targetSeconds}초 변형으로 재구성하고 있습니다.`);
+
+    try {
+      const { qcRisk, qcDirective, patternDirective } = buildGenerationDirectives(brief);
+      const pack = window.ShonodeAdPack;
+      const durationDirective = pack && typeof pack.buildDurationDirective === "function"
+        ? pack.buildDurationDirective(targetSeconds)
+        : "";
+
+      const payload = {
+        brief,
+        project: cloneProject(),
+        qcRisk,
+        qcDirective,
+        patternDirective,
+        durationDirective,
+        variantDirective: buildVariantDirective(targetSeconds),
+        targetSeconds,
+        existingPanelCount: panels.length,
+        referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),
+        referenceImageCount: aiReferenceImages.length,
+        referenceImages: aiReferenceImages.map((image) => ({
+          name: image.name,
+          mimeType: image.mimeType,
+          dataUrl: image.dataUrl,
+          width: image.width,
+          height: image.height
+        }))
+      };
+
+      let plan = null;
+      let source = "local";
+      let fallbackReason = "";
+
+      const aiClient = window.ShonodeAI || window.ShotBoardAI;
+      if (aiClient && typeof aiClient.generateStoryboard === "function") {
+        try {
+          plan = await aiClient.generateStoryboard(payload);
+          if (plan) {
+            source = "api";
+          }
+        } catch (error) {
+          fallbackReason = typeof error?.message === "string" ? error.message : "";
+          console.warn("ShonodeAI.generateStoryboard (variant) failed, using local fallback.", error);
+        }
+      }
+
+      if (!plan) {
+        plan = buildLocalStoryboardPlan(payload);
+      }
+
+      applyStoryboardPlan(normalizePlan(plan, payload), source);
+      updateProject({ targetDuration: sanitizeTargetDuration(String(targetSeconds)) }, { announce: false });
+      if (targetDurationInputEl) {
+        targetDurationInputEl.value = sanitizeTargetDuration(String(targetSeconds));
+      }
+
+      // Same ordering rule as handleGeneratePlan: the reason must outlive
+      // applyStoryboardPlan's own success status.
+      if (source === "local") {
+        setStatus(
+          fallbackReason
+            ? `AI 연결에 실패해 로컬 변형으로 대체했습니다 — ${fallbackReason.slice(0, 120)}`
+            : "AI 연결에 실패해 로컬 변형으로 대체했습니다.",
+          "warning"
+        );
+      } else {
+        setStatus(`${targetSeconds}초 변형을 적용했습니다. 이전 보드는 실행 취소(Ctrl+Z)로 복원할 수 있습니다.`);
+      }
+    } finally {
+      setGeneratingState(false);
+    }
+  }
+
+  // Digest of the current board injected into the variant prompt so the model
+  // rebudgets THIS storyboard instead of inventing a new concept.
+  function buildVariantDirective(targetSeconds) {
+    const digest = panels
+      .map((panel, index) => {
+        const line = [
+          `${index + 1}. ${panel.sceneTitle || `컷 ${index + 1}`}`,
+          panel.beat ? `beat=${panel.beat}` : "",
+          panel.durationLabel || "",
+          (panel.caption || "").slice(0, 120)
+        ]
+          .filter(Boolean)
+          .join(" | ");
+        return `- ${line}`;
+      })
+      .join("\n");
+
+    return [
+      `[길이 변형 파생] 아래 기존 스토리보드의 컨셉·주제·비주얼 방향·크리에이티브 패턴을 그대로 유지하면서 총 ${targetSeconds}초 버전으로 재구성하세요.`,
+      "새로운 아이디어로 갈아엎지 말고, 비트 시간 예산에 맞춰 기존 컷을 병합·분할·압축·확장하세요.",
+      "기존 스토리보드:",
+      digest
+    ].join("\n");
+  }
+
   function renderGeneratingStage(index = 0) {
     const stages = getGeneratingStages();
     const safeStage = stages[index % stages.length];
@@ -2911,6 +3059,9 @@
     generatePlanButtonLabelEl.textContent = nextState ? "생성 중..." : "AI 콘티 초안 생성";
     generatePlanButtonEl.classList.toggle("is-generating", nextState);
     generatePlanButtonEl.setAttribute("aria-busy", String(nextState));
+    variantDeriveButtonEls.forEach((button) => {
+      button.disabled = nextState;
+    });
     if (aiGenerationIndicatorEl) {
       aiGenerationIndicatorEl.hidden = !nextState;
     }
@@ -3408,7 +3559,10 @@
   }
 
   function buildLocalStoryboardPlan(payload) {
-    const duration = extractDuration(payload.brief);
+    const targetSeconds = Number(payload?.targetSeconds);
+    const duration = Number.isFinite(targetSeconds) && targetSeconds > 0
+      ? { min: targetSeconds, max: targetSeconds }
+      : extractDuration(payload.brief);
     const average = Math.round((duration.min + duration.max) / 2);
     const cutCount = average <= 20 ? 5 : average <= 30 ? 6 : 8;
     const subject = payload.brief.split(/[.!?]/)[0].trim() || "premium equestrian fashion commercial";
