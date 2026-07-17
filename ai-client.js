@@ -452,8 +452,13 @@ const shonodeAiClient = {
       );
       const imagePromptMode = this.inferImagePromptMode(panel, referenceImageIndexes);
 
-      return [
-        `Selected cut ${index + 1}:`,
+      const lines = [`Selected cut ${index + 1}:`];
+      if (panel?.repairDirective) {
+        lines.push(
+          `- repairInstruction (HIGHEST PRIORITY — fix this exact problem, do not merely restyle): ${panel.repairDirective}`
+        );
+      }
+      lines.push(
         `- sceneTitle: ${panel?.sceneTitle || ""}`,
         `- durationLabel: ${panel?.durationLabel || ""}`,
         `- caption: ${panel?.caption || ""}`,
@@ -466,7 +471,8 @@ const shonodeAiClient = {
         `- currentI2VStart: ${panel?.i2vStartPrompt || ""}`,
         `- currentI2VMotion: ${panel?.i2vMotionPrompt || ""}`,
         `- currentI2VEnd: ${panel?.i2vEndPrompt || ""}`
-      ].join("\n");
+      );
+      return lines.join("\n");
     }).join("\n\n");
   },
 

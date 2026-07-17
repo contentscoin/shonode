@@ -4666,3 +4666,162 @@ body.is-beat-lane-mode .caption-input {
   line-height: 1.45;
   color: var(--text-sub);
 }
+
+/* ── regen_queue QA board ────────────────────────────────────────────────── */
+.qa-board-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.qa-board-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.qa-board-seed-button {
+  flex: none;
+  padding: 6px 11px;
+  font-size: 0.78rem;
+  border-radius: 999px;
+}
+
+.qa-queue-output {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.qa-queue-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-sub);
+}
+
+.qa-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+.qa-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qa-row-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.qa-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qa-row-beat {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.qa-row-regen-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-sub);
+}
+
+.qa-row-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qa-row-field > span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-sub);
+}
+
+.qa-row-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-main);
+  font-size: 0.84rem;
+}
+
+.qa-row-input:focus-visible {
+  outline: none;
+  border-color: var(--accent-strong);
+}
+
+.qa-row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.qa-row-regen {
+  flex: 1;
+  padding: 8px 0;
+  font-size: 0.82rem;
+}
+
+.qa-row-clear {
+  flex: none;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+}
+
+/* Per-card QA flag button + flagged-card marker */
+.qa-flag-button.is-active {
+  border-color: #EF4444;
+  background: rgba(239, 68, 68, 0.14);
+  color: #EF4444;
+}
+
+/* outline (not box-shadow) so the QA marker composes with the selection /
+   drag / link rings instead of overriding them when a flagged card is also
+   selected or being dragged. */
+.story-card.is-qa-flagged {
+  outline: 2px solid rgba(239, 68, 68, 0.6);
+  outline-offset: 2px;
+}
