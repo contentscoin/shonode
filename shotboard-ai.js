@@ -83,6 +83,8 @@
   const exportWorkspaceButtonEl = document.getElementById("exportWorkspaceButton");
   const exportVideoJobSpecButtonEl = document.getElementById("exportVideoJobSpecButton");
   const exportClaimReportButtonEl = document.getElementById("exportClaimReportButton");
+  const qaQueueOutputEl = document.getElementById("qaQueueOutput");
+  const seedQaQueueButtonEl = document.getElementById("seedQaQueueButton");
   const workspaceMainEl = document.querySelector(".workspace-main");
   const workspaceStageEl = document.querySelector(".workspace-stage");
   const workspaceOverlayEl = document.getElementById("workspaceOverlay");
@@ -277,6 +279,10 @@
       i2vEndPrompt: "",
       nextPanelIds: [],
       videoFileName: "",
+      qaFlagged: false,
+      qaSymptom: "",
+      qaFix: "",
+      qaRegenCount: 0,
       ...overrides
     });
   };
@@ -315,7 +321,13 @@
       i2vMotionPrompt: typeof panel?.i2vMotionPrompt === "string" ? panel.i2vMotionPrompt : "",
       i2vEndPrompt: typeof panel?.i2vEndPrompt === "string" ? panel.i2vEndPrompt : "",
       nextPanelIds: Array.isArray(panel?.nextPanelIds) ? panel.nextPanelIds.filter((value) => typeof value === "string") : [],
-      videoFileName: typeof panel?.videoFileName === "string" ? panel.videoFileName : ""
+      videoFileName: typeof panel?.videoFileName === "string" ? panel.videoFileName : "",
+      // regen_queue QA fields: flagged cut + symptom/one-line-fix + regen count.
+      // Ride every persistence/snapshot/import path through this single gate.
+      qaFlagged: panel?.qaFlagged === true,
+      qaSymptom: typeof panel?.qaSymptom === "string" ? panel.qaSymptom : "",
+      qaFix: typeof panel?.qaFix === "string" ? panel.qaFix : "",
+      qaRegenCount: Number.isFinite(panel?.qaRegenCount) ? panel.qaRegenCount : 0
     };
   };
 
@@ -366,6 +378,7 @@
     renderBeatCoverage();
     renderQcRiskBadge();
     renderPatternRecommendations();
+    renderQaBoard();
   };
 
   persistProject = function overridePersistProject(...args) {
@@ -550,6 +563,23 @@
     syncPromptPanels(panel, promptPanels);
     card.classList.toggle("is-link-source", linkState?.sourceId === panel.id);
     card.classList.toggle("is-link-target", linkState?.targetId === panel.id);
+    card.classList.toggle("is-qa-flagged", Boolean(panel.qaFlagged));
+
+    const qaFlagButton = fragment.querySelector(".qa-flag-button");
+    if (qaFlagButton) {
+      const flagged = Boolean(panel.qaFlagged);
+      qaFlagButton.classList.toggle("is-active", flagged);
+      qaFlagButton.setAttribute("aria-pressed", String(flagged));
+      qaFlagButton.title = flagged ? "QA 큐에서 제거" : "QA 큐에 플래그";
+      qaFlagButton.addEventListener("click", () => {
+        const next = !panel.qaFlagged;
+        pushHistoryState();
+        // Full re-render (default) repaints the card + QA board via the chains.
+        updatePanel(panel.id, { qaFlagged: next }, { announce: false });
+        updateHistoryUI();
+        setStatus(next ? "QA 큐에 컷을 플래그했습니다." : "QA 큐에서 컷을 해제했습니다.");
+      });
+    }
 
     const keyframeButton = fragment.querySelector(".keyframe-generate-button");
     if (keyframeButton) {
@@ -805,6 +835,7 @@
     renderAiOutputs();
     renderSelectionDetail();
     renderBeatCoverage();
+    renderQaBoard();
   };
 
   updateCanvasMetrics = function overrideUpdateCanvasMetrics() {
@@ -890,6 +921,43 @@
   regenerateSelectionButtonEl?.addEventListener("click", handleRegenerateSelectedPanels);
   exportVideoJobSpecButtonEl?.addEventListener("click", handleExportVideoJobSpec);
   exportClaimReportButtonEl?.addEventListener("click", handleExportClaimReport);
+  seedQaQueueButtonEl?.addEventListener("click", seedQaQueueFromContract);
+  // QA queue row actions (regen / clear) via delegation.
+  qaQueueOutputEl?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button || !qaQueueOutputEl.contains(button)) {
+      return;
+    }
+    const panelId = button.closest(".qa-row")?.dataset.panelId;
+    if (!panelId) {
+      return;
+    }
+    if (button.dataset.action === "regen") {
+      regenerateFlaggedCut(panelId);
+    } else if (button.dataset.action === "clear") {
+      pushHistoryState();
+      updatePanel(panelId, { qaFlagged: false }, { announce: false });
+      updateHistoryUI();
+      setStatus("QA 큐에서 컷을 해제했습니다.");
+    }
+  });
+  // Symptom / one-line-fix persist on blur (change), NOT input, so the board is
+  // never rebuilt mid-keystroke (rerender:false keeps the QA board DOM intact).
+  qaQueueOutputEl?.addEventListener("change", (event) => {
+    const input = event.target.closest(".qa-row-input");
+    if (!input || !qaQueueOutputEl.contains(input)) {
+      return;
+    }
+    const panelId = input.closest(".qa-row")?.dataset.panelId;
+    if (!panelId) {
+      return;
+    }
+    if (input.classList.contains("qa-row-symptom")) {
+      updatePanel(panelId, { qaSymptom: input.value }, { announce: false, rerender: false });
+    } else if (input.classList.contains("qa-row-fix")) {
+      updatePanel(panelId, { qaFix: input.value }, { announce: false, rerender: false });
+    }
+  });
   importWorkspaceInputEl?.addEventListener("change", handleImportWorkspaceInputChange);
   createWorkspaceButtonEl?.addEventListener("click", handleCreateWorkspace);
   duplicateWorkspaceButtonEl?.addEventListener("click", handleDuplicateWorkspace);
@@ -2849,6 +2917,208 @@
     return pack.validateOutputContract({ cuts, risk, hasProof });
   }
 
+  // regen_queue QA board — lists every flagged cut with an editable symptom +
+  // one-line fix and a "regenerate this cut once" action. Rebuilt from panel
+  // state on every board/sidebar render (never mid-edit, to keep input focus).
+  function renderQaBoard() {
+    if (!qaQueueOutputEl) {
+      return;
+    }
+    const flagged = panels.filter((panel) => panel.qaFlagged);
+    if (flagged.length === 0) {
+      qaQueueOutputEl.dataset.empty = "true";
+      qaQueueOutputEl.innerHTML =
+        `<p class="qa-queue-empty">플래그된 컷이 없습니다. 컷 카드의 "QA" 버튼을 누르거나 "출력 계약으로 채우기"로 문제 컷을 모으세요.</p>`;
+      return;
+    }
+
+    qaQueueOutputEl.dataset.empty = "false";
+    qaQueueOutputEl.innerHTML = flagged
+      .map((panel) => {
+        const index = panels.indexOf(panel);
+        const title = panel.sceneTitle || `컷 ${index + 1}`;
+        const beatMeta = BEAT_META[panel.beat];
+        const beatBadge = beatMeta
+          ? `<span class="qa-row-beat" style="background:${beatMeta.color}">${escapeHtml(beatMeta.label)}</span>`
+          : "";
+        const regenCount = Number(panel.qaRegenCount) || 0;
+        const regenTag = regenCount > 0
+          ? `<span class="qa-row-regen-count" title="이 컷을 다시 생성한 횟수">재생성 ${regenCount}회</span>`
+          : "";
+        return `<div class="qa-row" data-panel-id="${escapeHtml(panel.id)}">
+          <div class="qa-row-head">
+            <span class="qa-row-index">${index + 1}</span>
+            <span class="qa-row-title">${escapeHtml(title)}</span>
+            ${beatBadge}
+            ${regenTag}
+          </div>
+          <label class="qa-row-field">
+            <span>증상</span>
+            <input class="qa-row-input qa-row-symptom" type="text" value="${escapeHtml(panel.qaSymptom || "")}" placeholder="예: 제품이 잘 안 보임 / CTA가 불명확">
+          </label>
+          <label class="qa-row-field">
+            <span>한 줄 수정</span>
+            <input class="qa-row-input qa-row-fix" type="text" value="${escapeHtml(panel.qaFix || "")}" placeholder="예: 마지막 프레임에 제품 클로즈업 + 로고">
+          </label>
+          <div class="qa-row-actions">
+            <button class="secondary-button qa-row-regen" type="button" data-action="regen">이 컷 재생성</button>
+            <button class="ghost-button qa-row-clear" type="button" data-action="clear">해제</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  // Seed the queue from final_output_contract: flag every cut a validation pass
+  // can pin to a panel — claim-language findings (per-panel) plus re-derived
+  // structural issues (empty content, unassigned beat). Board-level problems
+  // that carry no panelId cannot be flagged and stay in Beat Coverage.
+  function seedQaQueueFromContract() {
+    if (panels.length === 0) {
+      setStatus("먼저 스토리보드를 생성해주세요.", "warning");
+      return;
+    }
+    const contract = buildOutputContractReport();
+    if (!contract) {
+      setStatus("출력 계약 검증 모듈을 불러오지 못했습니다.", "warning");
+      return;
+    }
+
+    const symptomsByPanel = new Map();
+    const addSymptom = (panelId, text) => {
+      if (!panelId) {
+        return;
+      }
+      const prev = symptomsByPanel.get(panelId);
+      symptomsByPanel.set(panelId, prev ? `${prev}; ${text}` : text);
+    };
+
+    (contract.claimFindings || []).forEach((finding) => {
+      addSymptom(finding.panelId, `주장 표현 검출: ${finding.claimText}`);
+    });
+
+    panels.forEach((panel) => {
+      const captionEmpty = !(typeof panel.caption === "string" && panel.caption.trim());
+      const promptEmpty = ![panel.t2iPrompt, panel.i2vStartPrompt, panel.i2vMotionPrompt, panel.i2vEndPrompt]
+        .some((value) => typeof value === "string" && value.trim());
+      if (captionEmpty || promptEmpty) {
+        addSymptom(panel.id, "설명 또는 이미지 프롬프트가 비어 있음");
+      }
+      if (!PANEL_BEATS.includes(panel.beat)) {
+        addSymptom(panel.id, "비트 미지정");
+      }
+    });
+
+    if (symptomsByPanel.size === 0) {
+      setStatus(
+        contract.pass
+          ? "출력 계약을 충족합니다 — 컷 단위로 플래그할 문제가 없습니다."
+          : "컷 단위로 지목할 문제가 없습니다. Beat Coverage의 계약 경고를 확인하세요.",
+        contract.pass ? "neutral" : "warning"
+      );
+      return;
+    }
+
+    pushHistoryState();
+    panels = panels.map((panel, panelIndex) => {
+      const symptom = symptomsByPanel.get(panel.id);
+      if (!symptom) {
+        return panel;
+      }
+      return normalizePanel({
+        ...panel,
+        qaFlagged: true,
+        // Preserve a user-authored symptom; only fill blanks from the contract.
+        qaSymptom: typeof panel.qaSymptom === "string" && panel.qaSymptom.trim() ? panel.qaSymptom : symptom
+      }, panelIndex);
+    });
+    persistPanels();
+    renderPanels();
+    updateHistoryUI();
+    setStatus(`${symptomsByPanel.size}개 컷을 QA 큐에 플래그했습니다.`);
+  }
+
+  // Regenerate ONE flagged cut, injecting its symptom + one-line fix as a
+  // per-cut repair directive. Reuses the selected-cut regeneration writeback
+  // (by id, no new panels) and bumps qaRegenCount so the "once" intent is
+  // visible. No confirm dialog — the queue's "재생성" button IS the intent.
+  async function regenerateFlaggedCut(panelId) {
+    if (aiGenerating) {
+      return;
+    }
+    const panel = panels.find((item) => item.id === panelId);
+    if (!panel) {
+      return;
+    }
+
+    const brief = project.aiBrief?.trim()
+      || [project.title, project.logline].filter(Boolean).join(" — ").trim()
+      || "기존 스토리보드를 기반으로 한 광고";
+
+    setGeneratingState(true);
+    setStatus(`QA 큐: "${panel.sceneTitle || "선택 컷"}"을(를) 수정 지시에 맞춰 다시 생성하고 있습니다.`);
+
+    try {
+      const regenDirectives = buildGenerationDirectives(brief);
+      const payload = {
+        generationMode: "selected-panels",
+        brief,
+        project: cloneProject(),
+        qcRisk: regenDirectives.qcRisk,
+        qcDirective: regenDirectives.qcDirective,
+        patternDirective: regenDirectives.patternDirective,
+        selectedPanelCount: 1,
+        selectedPanels: buildSelectedPanelsPayload([panel]),
+        referenceWeight: Number.parseFloat(sanitizeReferenceWeight(project.referenceWeight)),
+        referenceImageCount: aiReferenceImages.length,
+        referenceImages: aiReferenceImages.map((image) => ({
+          name: image.name,
+          mimeType: image.mimeType,
+          dataUrl: image.dataUrl,
+          width: image.width,
+          height: image.height
+        }))
+      };
+
+      let plan = null;
+      let source = "local";
+      const aiClient = window.ShonodeAI || window.ShotBoardAI;
+      if (aiClient && typeof aiClient.generateStoryboard === "function") {
+        try {
+          plan = await aiClient.generateStoryboard(payload);
+          if (plan) {
+            source = "api";
+          }
+        } catch (error) {
+          console.warn("QA regenerate failed, using local fallback.", error);
+        }
+      }
+
+      if (!plan) {
+        plan = buildLocalSelectedStoryboardPlan(payload);
+      }
+
+      pushHistoryState();
+      applySelectedStoryboardPlan(normalizeSelectedPlan(plan, payload), [panel], source);
+
+      // qa fields survive applySelectedStoryboardPlan via its `...panel` spread;
+      // bump the regen counter on the rebuilt panel so the "once" is visible.
+      const regenerated = panels.find((item) => item.id === panelId);
+      if (regenerated) {
+        updatePanel(panelId, { qaRegenCount: (regenerated.qaRegenCount || 0) + 1 }, { announce: false });
+      }
+      updateHistoryUI();
+
+      if (source === "api") {
+        setStatus("QA 큐: 컷을 다시 생성했습니다. 결과를 확인하고 해제하세요.");
+      } else {
+        setStatus("AI 연결에 실패해 QA 컷을 로컬 초안으로 다시 만들었습니다.", "warning");
+      }
+    } finally {
+      setGeneratingState(false);
+    }
+  }
+
   async function handleGeneratePlan() {
     const brief = project.aiBrief?.trim();
     if (!brief) {
@@ -4408,8 +4678,29 @@ ${negativeRules}
       i2vMotionPrompt: panel.i2vMotionPrompt || "",
       i2vEndPrompt: panel.i2vEndPrompt || "",
       hasImage: Boolean(panel.image),
-      fileName: panel.fileName || ""
+      fileName: panel.fileName || "",
+      // regen_queue: a flagged cut carries its symptom + one-line fix as a
+      // per-cut repair directive so regeneration targets the exact problem.
+      repairDirective: buildRepairDirective(panel)
     }));
+  }
+
+  // Turns a flagged panel's QA symptom + one-line fix into a per-cut directive
+  // injected into the selected-regeneration prompt. Empty for unflagged cuts.
+  function buildRepairDirective(panel) {
+    if (!panel?.qaFlagged) {
+      return "";
+    }
+    const symptom = typeof panel.qaSymptom === "string" ? panel.qaSymptom.trim() : "";
+    const fix = typeof panel.qaFix === "string" ? panel.qaFix.trim() : "";
+    const parts = [];
+    if (symptom) {
+      parts.push(`문제 증상: ${symptom}`);
+    }
+    if (fix) {
+      parts.push(`한 줄 수정 지시: ${fix}`);
+    }
+    return parts.join(" / ");
   }
 
   function createSelectedFallbackCut(panel, index) {
