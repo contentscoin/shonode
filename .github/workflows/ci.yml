@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # No install step: the project has zero runtime/dev dependencies and the
+      # test suite uses Node's built-in `node:test` runner.
+      - name: Syntax check + unit tests
+        run: npm run verify

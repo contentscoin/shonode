@@ -53,8 +53,12 @@ PORT=4173
 
 ```bash
 npm run dev        # http://127.0.0.1:4173
-npm run check      # 전체 JS 문법 검사
+npm run check      # 전체 JS 문법 검사 (node --check)
+npm test           # 순수 로직 유닛 테스트 (node:test, 의존성 없음)
+npm run verify     # check + test 한 번에 (CI에서 실행)
 ```
+
+유닛 테스트는 브라우저 없이 핵심 비즈니스 로직을 검증합니다 — 6비트 광고 계약·클레임 세이프티 분류·패턴 추천·길이 스케일링·출력 계약 검증(`packs/ad-storyboard-skill.js`)과 오리진 정책·크레딧 차감 게이팅(`storyboard-proxy.js`·`credits.js`). GitHub Actions(`.github/workflows/ci.yml`)가 push·PR마다 `npm run verify`를 실행합니다.
 
 ## AI 제공자
 
